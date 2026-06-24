@@ -1,6 +1,6 @@
 {
   "name": "devspace",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "A single-user **desktop AI workspace** — a Tauri (Rust) shell wrapping a local Python/FastAPI backend, supporting both **local and API LLM providers**. Inspired by [Odysseus](https://github.com/pewdiepie-archdaemon/odysseus): chat + agents, deep research, documents, email, calendar/notes/tasks, image gallery/editor, and local model management — all running on your machine, no login.",
   "main": "index.js",
   "directories": {

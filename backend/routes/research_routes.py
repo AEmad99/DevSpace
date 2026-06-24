@@ -10,7 +10,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse

@@ -1250,7 +1250,19 @@ def setup_chat_routes(
                 # confirmed, which arrives as force_media=video).
                 if _route_kind == "video" and force_media != "video":
                     yield f'data: {json.dumps({"type": "media_confirm", "media": "video", "prompt": _route_prompt, "model": _mmodel})}\n\n'
-                    yield f'data: {json.dumps({"delta": f"I can generate a video for: \"{_route_prompt}\". This takes ~1-3 minutes and uses credits — confirm to proceed."})}\n\n'
+                    # Build the inner f-string in a local first — Python 3.11's
+                    # f-string grammar forbids backslash escapes inside an f-string
+                    # EXPRESSION, and nesting f"{...}" inside another f-string's
+                    # expression that contains a backslash raises SyntaxError
+                    # (the exact error that was making the bundled Python 3.11
+                    # fail to import this module at app startup, leaving the
+                    # app stuck on the splash forever). Hoisting it out of the
+                    # nested expression keeps both f-strings legal.
+                    _video_delta = (
+                        f'I can generate a video for: "{_route_prompt}". '
+                        'This takes ~1-3 minutes and uses credits — confirm to proceed.'
+                    )
+                    yield f'data: {json.dumps({"delta": _video_delta})}\n\n'
                     if not incognito:
                         save_assistant_response(sess, session_manager, session,
                             f"[Offered to generate a video: {_route_prompt}]", None, incognito=incognito)
