@@ -1,0 +1,73 @@
+fastapi
+uvicorn
+# WebSocket transport for uvicorn — powers the interactive in-app terminal
+# (routes/code_workspace_routes.py → /api/workspace/pty) and the LSP bridge
+# (routes/lsp_routes.py → /api/lsp/{lang}). Without websockets (or wsproto)
+# uvicorn rejects the WS upgrade.
+websockets
+# Real pseudo-terminal for the in-app terminal on Windows (ConPTY). The in-box
+# kernel32 ConPTY did not attach child processes reliably on current Windows
+# builds, so we use pywinpty's bundled ConPTY (the approach VS Code/Jupyter
+# take). POSIX uses the stdlib `pty` module and needs nothing extra.
+pywinpty; platform_system == "Windows"
+python-multipart
+python-dotenv
+httpx
+pydantic>=2.13.4
+pydantic-settings>=2.14.1
+SQLAlchemy
+pypdf
+beautifulsoup4
+charset-normalizer
+numpy
+# Language Server Protocol — powers the LSP bridge in routes/lsp_routes.py.
+# `pylsp` is the in-app Python language server (autocomplete, hover, go-to-
+# definition, diagnostics, formatting). The `[all]` extra pulls in rope (refactor),
+# pyflakes (diagnostics), flake8 (linting), pylint (deeper lint), yapf
+# (formatting), and mccabe (complexity) — the same default VS Code offers.
+# Only used when the user opens a Python file in the Code workspace; the LSP
+# is an optional UX feature, not on a critical path. The frontend reads
+# /api/lsp/availability and silently disables the LSP indicator when pylsp
+# is missing.
+python-lsp-server[all]>=1.7.0
+# Vector store + local embeddings for RAG, semantic memory, and tool
+# selection. Used on core agent paths, so installed by default — the app
+# still degrades to keyword fallback if they're ever missing.
+# DevSpace runs ChromaDB EMBEDDED (in-process PersistentClient under
+# backend/data/chroma — see src/chroma_client.py), so we need the full
+# `chromadb` package, not the HTTP-only `chromadb-client`. (Note: the two
+# install over the same package dir and conflict — install only one.) The old
+# HTTP-client mode is still reachable via CHROMADB_MODE=http / CHROMADB_HOST.
+# fastembed runs the local ONNX embeddings.
+chromadb
+fastembed
+youtube-transcript-api
+# Markdown rendering for research reports (src/visual_report.py).
+# Imported at module-top so it's a hard core dep, not optional.
+markdown
+# HTML sanitizer for rendered research reports (src/visual_report.py). Report
+# content is untrusted (LLM output over crawled pages) and report pages run
+# under a relaxed CSP, so the rendered HTML is allowlist-sanitized.
+nh3
+# Calendar .ics import/export (routes/calendar_routes.py).
+icalendar
+# Recurrence rule expansion for calendar events (routes/calendar_routes.py).
+# Imported directly as dateutil.rrule — make it explicit even though caldav
+# pulls it in transitively.
+python-dateutil
+# CalDAV sync (src/caldav_sync.py). Handles PROPFIND discovery + REPORT
+# fetch across Radicale, Nextcloud, Apple, Fastmail; we'd be reinventing
+# the protocol without it.
+caldav
+cryptography
+bcrypt
+mcp
+pyotp
+qrcode[pil]
+croniter
+pytest
+pytest-asyncio
+# starlette.testclient prefers httpx2 since Starlette 1.2.0 and warns on every
+# TestClient import when only classic httpx is present. Runtime code keeps
+# using `httpx` above; this is test-client only.
+httpx2

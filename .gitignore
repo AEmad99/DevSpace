@@ -1,0 +1,48 @@
+# ── Dependencies ────────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+venv/
+.venv/
+**/venv/
+
+# ── Reference clone (upstream Odysseus, has its own .git + venv; not part of this repo) ──
+/odysseus-ref/
+
+# ── Rust / Tauri build output ───────────────────────────────────────────────
+/src-tauri/target/
+/src-tauri/gen/
+
+# ── Python build artifacts ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Runtime data & secrets (personal; never commit) ─────────────────────────
+/backend/data/
+/backend/logs/
+*.log
+.app_key
+*.db
+.env
+.env.*
+
+# ── Probes / scratch ────────────────────────────────────────────────────────
+/_probe/
+
+# ── Agent working directories (opencode / claude-code scratch) ───────────
+# These are local CLI tool state dirs, not part of the project source.
+.claude/
+
+# ── OS / editor noise ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+
+# Bundled self-contained runtime (built locally, not committed)
+src-tauri/resources/

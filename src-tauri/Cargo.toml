@@ -1,0 +1,44 @@
+[package]
+name = "app"
+version = "1.1.0"
+description = "DevSpace — a single-user desktop AI workspace"
+authors = ["you"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.11.2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-dialog = "2"
+# Opens external/report URLs in the user's default browser. The webview is
+# navigated to the backend's remote http origin, where window.open('_blank')
+# is a no-op under Wry — the deep-research "Visual Report" button relies on
+# this plugin's open_url command instead (see static/js/nativeDialog.js).
+tauri-plugin-opener = "2"
+# Guarantees only one app instance runs, so we can never stack multiple backends.
+tauri-plugin-single-instance = "2"
+# Native OS notifications. The frontend (served from the loopback origin) fires
+# these via withGlobalTauri when a long task finishes while the window is hidden
+# (see static/js/desktopNotifications.js). Scoped in capabilities/default.json.
+tauri-plugin-notification = "2"
+
+# Windows Job Object APIs — used to guarantee the backend process *tree*
+# (uvicorn + every MCP-server subprocess it spawns) is killed when this app
+# exits, even on crash or Ctrl+C. Without this, killing only the direct child
+# orphans the MCP-server grandchildren.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }

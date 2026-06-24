@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DevSpace — message bubble styles</title>
+<style>
+  body { margin:0; background:#16181d; color:#cdd3de;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding:28px 32px 70px; }
+  h1 { font-size:22px; margin:0 0 6px; color:#fff; }
+  .lead { color:#8a93a3; font-size:13px; margin:0 0 8px; max-width:860px; line-height:1.55; }
+  h2 { font-size:15px; margin:38px 0 4px; color:#fff; display:flex; align-items:center; gap:10px; }
+  h2 .pill { font-size:11px; font-weight:700; background:#61afef; color:#0b1220; border-radius:6px; padding:2px 9px; }
+  .vdesc { color:#8a93a3; font-size:12.5px; margin:0 0 16px; max-width:820px; line-height:1.5; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:16px; }
+  .card { border:1px solid #2a2e37; border-radius:14px; overflow:hidden; background:#1b1e24; }
+  .card .cap { font-size:11px; color:#8a93a3; padding:8px 12px; border-bottom:1px solid #2a2e37; }
+  .card .cap b { color:#cdd3de; font-weight:600; text-transform:capitalize; }
+  .chat { padding:16px 14px; display:flex; flex-direction:column;
+    font-family:ui-monospace,"Cascadia Code",Consolas,monospace; min-height:156px; }
+
+  /* ── shared bubble base ── */
+  .msg { position:relative; max-width:88%; padding:13px 16px; line-height:1.5; font-size:13px;
+    margin:7px 0; width:fit-content; color:var(--fg); }
+  .msg .role { font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; font-weight:700;
+    margin-bottom:7px; display:flex; align-items:center; gap:7px; opacity:.82; }
+  .msg .role .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto;
+    background:color-mix(in srgb, var(--fg) 35%, transparent); }
+  .msg .role .ts { margin-left:auto; font-weight:400; text-transform:none; letter-spacing:0;
+    opacity:.6; font-size:10px; }
+  .msg .body code { background:color-mix(in srgb, var(--fg) 13%, transparent); padding:1px 5px;
+    border-radius:5px; font-size:.92em; }
+  .msg-user { margin-left:auto; align-items:flex-end; }
+  .msg-ai { margin-right:auto; }
+  .ftr { margin-top:9px; display:flex; gap:9px; align-items:center; font-size:10px; opacity:.55; }
+
+  /* ── 0 · Current ── */
+  .v-cur .msg-ai { background:var(--panel); border:1px solid var(--border); border-radius:18px 18px 18px 0; }
+  .v-cur .msg-user { background:color-mix(in srgb, var(--fg) 8%, var(--bg)); border:1px solid var(--border);
+    border-radius:18px 18px 0 18px; }
+
+  /* ── A · Elevated (depth + gradient + accent glow) ── */
+  .v-elev .msg-ai {
+    background:linear-gradient(180deg, color-mix(in srgb, var(--fg) 6%, var(--bg)), color-mix(in srgb, var(--fg) 2.5%, var(--bg)));
+    border:1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    border-radius:16px 16px 16px 5px;
+    box-shadow:0 1px 1px rgba(0,0,0,.16), 0 10px 26px -14px rgba(0,0,0,.5),
+               inset 0 1px 0 color-mix(in srgb, var(--fg) 7%, transparent); }
+  .v-elev .msg-user {
+    background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 22%, var(--bg)), color-mix(in srgb, var(--accent) 12%, var(--bg)));
+    border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    border-radius:16px 16px 5px 16px;
+    box-shadow:0 1px 1px rgba(0,0,0,.14), 0 10px 26px -14px color-mix(in srgb, var(--accent) 50%, transparent),
+               inset 0 1px 0 color-mix(in srgb, #fff 12%, transparent); }
+  .v-elev .msg .role .dot { background:var(--accent); box-shadow:0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); }
+
+  /* ── B · Accent Rail (flat, colored edge) ── */
+  .v-rail .msg-ai {
+    background:color-mix(in srgb, var(--fg) 4%, var(--bg));
+    border:1px solid color-mix(in srgb, var(--border) 40%, transparent);
+    border-left:2.5px solid color-mix(in srgb, var(--fg) 28%, var(--border));
+    border-radius:5px 14px 14px 5px; }
+  .v-rail .msg-user {
+    background:color-mix(in srgb, var(--accent) 13%, var(--bg));
+    border:1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    border-right:2.5px solid var(--accent);
+    border-radius:14px 5px 5px 14px; }
+  .v-rail .msg .role .dot { background:var(--accent); }
+
+  /* ── C · Soft Outline (airy, accent ring on user) ── */
+  .v-soft .msg-ai {
+    background:color-mix(in srgb, var(--fg) 3.5%, var(--bg));
+    border:1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    border-radius:18px 18px 18px 6px;
+    box-shadow:0 2px 10px -8px rgba(0,0,0,.45); }
+  .v-soft .msg-user {
+    background:transparent;
+    border:1.5px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+    border-radius:18px 18px 6px 18px;
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent); }
+  .v-soft .msg .role .dot { background:var(--accent); }
+</style>
+</head>
+<body>
+  <h1>DevSpace — message bubble styles</h1>
+  <p class="lead">Three premium candidates (A / B / C) versus the current look. Every style is built from your theme variables
+    (<code>--bg / --fg / --panel / --border / --accent</code>), so it adapts to all 16 themes automatically — shown here across 6 of them.
+    Tell me which you like (or mix). <em>Font is a monospace fallback; the real app uses Fira Code.</em></p>
+  <div id="root"></div>
+<script>
+const THEMES = [
+  { n:'dark (default)', bg:'#282c34', fg:'#9cdef2', panel:'#111111', border:'#355a66', ac:'#61afef' },
+  { n:'light',          bg:'#f0ebe3', fg:'#5a5248', panel:'#faf6f0', border:'#d4cdc2', ac:'#c47d5a' },
+  { n:'midnight',       bg:'#0d1117', fg:'#c9d1d9', panel:'#161b22', border:'#30363d', ac:'#f85149' },
+  { n:'ocean',          bg:'#0b1a2c', fg:'#64d2ff', panel:'#091422', border:'#1e5074', ac:'#4facfe' },
+  { n:'claude',         bg:'#262624', fg:'#f5f4f0', panel:'#30302e', border:'#4a4a47', ac:'#c6613f' },
+  { n:'cyberpunk',      bg:'#0a0a0f', fg:'#0ff0fc', panel:'#12101a', border:'#9b30ff', ac:'#e040fb' },
+];
+const VARIANTS = [
+  { k:'cur',  label:'Current',          pill:'now', desc:"Today's look — flat panels, a hard near-black --panel surface, and a single sharp corner." },
+  { k:'elev', label:'A · Elevated',     pill:'A',   desc:'Soft depth: gradient surface, hairline border with a lit top edge, and a drop shadow. Your messages get a subtle accent tint + a glowing role dot. The richest / most premium.' },
+  { k:'rail', label:'B · Accent Rail',  pill:'B',   desc:'Flat & modern (Linear / Notion feel): a faint surface with a colored edge rail — accent on you, muted on the assistant. Minimal, no shadow.' },
+  { k:'soft', label:'C · Soft Outline', pill:'C',   desc:'Clean & airy: gentle tint, a rounded hairline outline, and a soft accent ring around your messages. Light-touch depth.' },
+];
+const sample = () => `
+  <div class="msg msg-ai">
+    <div class="role"><span class="dot"></span>MiniMax-M3<span class="ts">8:24 PM</span></div>
+    <div class="body">Done — the Documents panel is open. You can edit <code>cairo.md</code> in the in-app editor.</div>
+    <div class="ftr">32.4 tok/s · Copy · &#8943;</div>
+  </div>
+  <div class="msg msg-user">
+    <div class="role">You<span class="ts">8:24 PM</span></div>
+    <div class="body">yes open the documents panel</div>
+  </div>`;
+const root = document.getElementById('root');
+for (const v of VARIANTS) {
+  const sec = document.createElement('section');
+  sec.innerHTML = `<h2><span class="pill">${v.pill}</span>${v.label}</h2><p class="vdesc">${v.desc}</p>`;
+  const grid = document.createElement('div'); grid.className = 'grid';
+  for (const t of THEMES) {
+    const card = document.createElement('div'); card.className = 'card';
+    card.innerHTML = `<div class="cap"><b>${t.n}</b></div>`
+      + `<div class="chat v-${v.k}" style="--bg:${t.bg};--fg:${t.fg};--panel:${t.panel};--border:${t.border};--accent:${t.ac};--red:${t.ac};background:${t.bg}">${sample()}</div>`;
+    grid.appendChild(card);
+  }
+  sec.appendChild(grid); root.appendChild(sec);
+}
+</script>
+</body>
+</html>

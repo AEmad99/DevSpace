@@ -1,0 +1,35 @@
+# Gitleaks config for DevSpace.
+# Goal: block any commit that introduces a hardcoded API key for any
+# provider (OpenAI sk-..., Anthropic sk-ant-..., GitHub PAT ghp_/gho_/
+# github_pat_..., AWS AKIA..., Google AIza..., Hugging Face hf_..., etc.).
+# Bare env-var NAME references (`os.environ['OPENAI_API_KEY']`,
+# `${OPENAI_API_KEY}`, `OPENAI_API_KEY=...` in a .env.example) are NOT
+# secrets and are allowlisted below.
+
+title = "DevSpace gitleaks"
+
+[extend]
+# Use the built-in default ruleset. Override below for the few
+# project-specific allowances.
+useDefault = true
+
+[allowlist]
+description = "Paths and patterns that are allowed to mention env-var NAMES without it being a real key."
+paths = [
+  '''\.venv/''',
+  '''venv/''',
+  '''node_modules/''',
+  '''dist/''',
+  '''build/''',
+  '''target/''',
+  '''odysseus-ref/venv/''',
+]
+# Bare env-var name references in code — `os.environ['FOO_API_KEY']`,
+# `${FOO_API_KEY}`, `FOO_API_KEY=...` in a .env.example — are not secrets.
+regexes = [
+  '''OPENAI_API_KEY''',
+  '''ANTHROPIC_API_KEY''',
+  '''GOOGLE_API_KEY''',
+  '''HUGGINGFACE_API_KEY''',
+  '''AZURE_API_KEY''',
+]
