@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
@@ -93,8 +94,17 @@ class KnowledgeBaseSource(Source):
     # Manifest I/O
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def manifest_path(kb_id: str) -> Path:
+    # KB ids are minted via secrets.token_urlsafe(8) → URL-safe base64 alphabet.
+    _KB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+    @classmethod
+    def manifest_path(cls, kb_id: str) -> Path:
+        # SECURITY: kb_id arrives from a research `source` spec config and is
+        # concatenated into a file path. Reject anything outside the mint
+        # alphabet so a crafted kb_id like "../../vault" can't read an
+        # arbitrary JSON outside the manifests dir.
+        if not isinstance(kb_id, str) or not cls._KB_ID_RE.match(kb_id):
+            raise ValueError(f"Invalid knowledge base id: {kb_id!r}")
         return _manifests_dir() / f"{kb_id}.json"
 
     def _load_manifest(self) -> Dict[str, Any]:

@@ -19,6 +19,8 @@ from . import internet  # noqa: F401  -- registers InternetSource
 from . import folder    # noqa: F401  -- registers FolderSource  (M2)
 from . import codebase  # noqa: F401  -- registers CodebaseSource (M3)
 from . import knowledge_base  # noqa: F401  -- registers KnowledgeBaseSource (M4)
+from . import library   # noqa: F401  -- registers LibrarySource (search user's saved research)
+from . import previous_chats  # noqa: F401  -- registers PreviousChatsSource (search user's chat history)
 
 __all__ = [
     "Finding",

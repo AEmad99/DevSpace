@@ -4,14 +4,17 @@ import os
 
 from src.runtime_paths import get_app_root, get_default_data_dir
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 # Feature flag for the new pluggable research-sources system (issue #2).
-# Default off so the existing internet-only behavior is the safe baseline.
-# Turn on in dev/staging to expose folder / codebase / knowledge-base
-# sources via /api/research/sources and to accept `source:` in
-# /api/research/start. See docs/issue-2-knowledge-sources-detailed-plan.md.
-RESEARCH_SOURCES_ENABLED = os.environ.get("RESEARCH_SOURCES_ENABLED", "false").lower() == "true"
+# Unconditionally enabled — every source (internet, folder, codebase, kb,
+# library, previous-chats) is exposed via /api/research/sources and
+# /api/research/start accepts the `source:` / `sources:` keys. Set
+# RESEARCH_SOURCES_ENABLED=false in the environment to roll back to the
+# legacy internet-only flow. See docs/issue-2-knowledge-sources-detailed-plan.md.
+RESEARCH_SOURCES_ENABLED = os.environ.get(
+    "RESEARCH_SOURCES_ENABLED", "true"
+).lower() != "false"
 
 # Base paths
 BASE_DIR = os.path.join(get_app_root(), "")

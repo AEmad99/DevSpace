@@ -329,7 +329,7 @@ export function openPanel(focusJobId) {
   // inside it. Desktop: centered ~640px / 85vh modal like the rest.
   pane.style.cssText = (window.innerWidth <= 768)
     ? 'width:100vw;max-width:100vw;height:90dvh;max-height:90dvh;border-radius:14px 14px 0 0;background:var(--bg);'
-    : 'width:min(640px, 92vw);max-height:85vh;background:var(--bg);';
+    : 'width:min(760px, 94vw);max-height:85vh;background:var(--bg);';
   pane.innerHTML = _buildPanelHTML();
 
   overlay.appendChild(pane);
@@ -582,15 +582,23 @@ function _readSettings() {
   const pickerEl = document.getElementById('research-source-picker');
   const selected = pickerEl ? readPickerSelection(pickerEl) : null;
   if (selected && selected.length) {
-    // Prefer the first NON-internet selection; fall back to the first
-    // (which is Internet, meaning "default behavior").
-    const explicit = selected.find(s => s.type !== 'internet');
-    if (explicit) settings.source = explicit;
-    // If more than one non-internet was added, send the array form so
-    // the server can do hybrid. The route's body schema accepts an
-    // object OR an array; we use `sources` (plural) for the array.
-    const extras = selected.filter(s => s !== explicit);
-    if (extras.length) settings.sources = [explicit, ...extras];
+    let selectedSources = selected.filter(s => s && s.type);
+    // A Library row with nothing checked contributes no findings (UX contract:
+    // empty selection = no findings). Drop those no-op rows so we don't ship an
+    // empty/garbage report with no fallback — research then falls back to the
+    // other selected sources, or to default Internet.
+    selectedSources = selectedSources.filter(
+      s => !(s.type === 'library' && !(s.config && s.config.report_ids && s.config.report_ids.length))
+    );
+    const customSources = selectedSources.filter(s => s.type !== 'internet');
+    if (customSources.length) {
+      // Only the default Internet row means legacy default behavior, so omit
+      // source settings entirely. Internet + custom rows intentionally becomes
+      // hybrid mode.
+      const payloadSources = selectedSources.length > 1 ? selectedSources : customSources;
+      if (payloadSources.length === 1) settings.source = payloadSources[0];
+      else settings.sources = payloadSources;
+    }
   }
   return settings;
 }
@@ -1119,6 +1127,25 @@ function _buildJobCard(job) {
     card.addEventListener('click', () => {
       openResearchReport(job.id, _apiBase);
     });
+    // Internal citations (library:// / chats://) — route the custom schemes to
+    // the report/session openers; the webview can't follow them as hrefs.
+    card.querySelectorAll('[data-cite-id]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();   // don't also trigger the card's open-report click
+        const scheme = el.getAttribute('data-cite-scheme');
+        const id = el.getAttribute('data-cite-id');
+        if (!id) return;
+        if (scheme === 'library') {
+          openResearchReport(id, _apiBase);
+        } else if (scheme === 'chats') {
+          // Navigate to the existing chat session (same hash convention the
+          // follow-up-chat flow uses).
+          window.location.hash = '#' + id;
+          window.location.reload();
+        }
+      });
+    });
     card.querySelector('[data-action="copy"]').addEventListener('click', async (e) => {
       e.stopPropagation();
       const btn = e.currentTarget; // capture before await — currentTarget becomes null after
@@ -1216,6 +1243,13 @@ function _renderResult(job) {
     html += '<div class="research-job-sources">';
     for (const s of job.sources.slice(0, 10)) {
       const title = _esc(s.title || s.url || '');
+      const cite = _internalCite(s.url);
+      if (cite) {
+        // library:// / chats:// — wired to a click handler below (no href so
+        // the webview never tries to navigate the custom scheme).
+        html += `<a href="#" class="research-source-link research-source-link-internal" data-cite-scheme="${_escAttr(cite.scheme)}" data-cite-id="${_escAttr(cite.id)}">${title}</a>`;
+        continue;
+      }
       const url = _safeSourceHref(s.url);
       html += url
         ? `<a href="${url}" target="_blank" rel="noopener" class="research-source-link">${title}</a>`
@@ -1227,7 +1261,16 @@ function _renderResult(job) {
 
   const bodyCls = `research-job-report-body${cat ? ' research-body-' + cat : ''}`;
   if (_markdownModule) {
-    html += `<div class="${bodyCls}">${_markdownModule.renderContent(job.result)}</div>`;
+    // SECURITY: the report body is LLM-synthesized from untrusted web/file
+    // content and can contain injected HTML. renderContent() only normalizes
+    // shape (array→string) and does NOT sanitize, so route the normalized
+    // text through processWithThinking()/mdToHtml() — the same sanitizing
+    // pipeline the chat renderer uses (markdown.js: sanitizeAllowedHtml).
+    const _body = _markdownModule.renderContent(job.result);
+    const _safe = _markdownModule.processWithThinking
+      ? _markdownModule.processWithThinking(_body)
+      : _esc(_body);
+    html += `<div class="${bodyCls}">${_safe}</div>`;
   } else {
     html += `<div class="${bodyCls}"><pre>${_esc(job.result)}</pre></div>`;
   }
@@ -1354,3 +1397,13 @@ function _safeSourceHref(raw) {
   } catch {}
   return '';
 }
+
+// Internal research citations use custom schemes (library://<id>, chats://<id>)
+// that the desktop webview can't navigate. Parse them so the click handler can
+// route to openResearchReport()/the chat session instead of leaving a dead link.
+function _internalCite(raw) {
+  const m = /^(library|chats):\/\/([^#?]+)/.exec(String(raw || '').trim());
+  return m ? { scheme: m[1], id: m[2] } : null;
+}
+// _esc() escapes <>& but not quotes; harden for double-quoted attributes.
+function _escAttr(s) { return _esc(s).replace(/"/g, '&quot;'); }

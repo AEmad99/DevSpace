@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import hashlib
 import logging
 import os
+import threading
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,9 @@ class EmbeddingLane:
 
 def reset_embedding_lane_state() -> None:
     """Reset process-local embedding lane state after endpoint config changes."""
+    global _FASTEMBED_CLIENT
+    with _FASTEMBED_LOCK:
+        _FASTEMBED_CLIENT = None
     try:
         from src.embeddings import reset_http_embed_state
         reset_http_embed_state()
@@ -111,12 +115,30 @@ def _load_custom_endpoint() -> Dict[str, str]:
     return {"url": url, "model": model, "api_key": api_key}
 
 
-def _build_fastembed_client():
-    from src.embeddings import FastEmbedClient
+# The local FastEmbed ONNX model is stateless and fixed for the process
+# lifetime (its name comes from env/default and never changes), but
+# constructing a FastEmbedClient reloads the ONNX model and runs a warmup
+# inference — a multi-hundred-ms cost. build_embedding_lanes() is called on
+# every research warmup()/retrieve() (per source, per round), so cache the
+# client process-wide and reuse it. Cleared by reset_embedding_lane_state().
+_FASTEMBED_CLIENT: Any = None
+_FASTEMBED_LOCK = threading.Lock()
 
-    client = FastEmbedClient()
-    client.get_sentence_embedding_dimension()
-    return client
+
+def _build_fastembed_client():
+    global _FASTEMBED_CLIENT
+    if _FASTEMBED_CLIENT is not None:
+        return _FASTEMBED_CLIENT
+    with _FASTEMBED_LOCK:
+        # Double-checked: another thread may have built it while we waited.
+        if _FASTEMBED_CLIENT is not None:
+            return _FASTEMBED_CLIENT
+        from src.embeddings import FastEmbedClient
+
+        client = FastEmbedClient()
+        client.get_sentence_embedding_dimension()
+        _FASTEMBED_CLIENT = client
+        return _FASTEMBED_CLIENT
 
 
 def _build_custom_client():

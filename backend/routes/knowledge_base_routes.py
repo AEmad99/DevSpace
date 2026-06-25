@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -93,6 +94,26 @@ def _flag_or_403() -> None:
             "Knowledge bases are disabled. Set "
             "RESEARCH_SOURCES_ENABLED=true to enable.",
         )
+
+
+# KB ids are minted via secrets.token_urlsafe(8) → URL-safe base64 alphabet.
+_KB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _safe_kb_id(kb_id: str) -> str:
+    """Validate a path-segment kb_id before using it to build a file path.
+
+    SECURITY: ``{kb_id}`` comes straight from the URL and is concatenated into
+    ``_manifests_dir() / f"{kb_id}.json"``. Without this guard, a request such
+    as ``GET /api/knowledge_bases/..%5Cvault`` (Windows: Starlette does not
+    normalize ``%5C``) escapes the manifests dir and reads/overwrites/deletes
+    arbitrary ``*.json`` under DATA_DIR (e.g. ``vault.json``). Restricting to
+    the mint alphabet rejects separators, dots and traversal sequences while
+    accepting every legitimately-generated id.
+    """
+    if not isinstance(kb_id, str) or not _KB_ID_RE.match(kb_id):
+        raise HTTPException(400, "Invalid knowledge base id.")
+    return kb_id
 
 
 # ----------------------------------------------------------------------
@@ -163,6 +184,7 @@ def create_kb(body: KBCreateRequest, _: Request) -> Dict[str, Any]:
 @router.get("/{kb_id}")
 def get_kb(kb_id: str, _: Request) -> Dict[str, Any]:
     _flag_or_403()
+    kb_id = _safe_kb_id(kb_id)
     p = _manifests_dir() / f"{kb_id}.json"
     if not p.exists():
         raise HTTPException(404, f"Knowledge base '{kb_id}' not found")
@@ -177,6 +199,7 @@ def get_kb(kb_id: str, _: Request) -> Dict[str, Any]:
 @router.put("/{kb_id}")
 def replace_kb(kb_id: str, body: KBReplaceRequest, _: Request) -> Dict[str, Any]:
     _flag_or_403()
+    kb_id = _safe_kb_id(kb_id)
     p = _manifests_dir() / f"{kb_id}.json"
     if not p.exists():
         raise HTTPException(404, f"Knowledge base '{kb_id}' not found")
@@ -192,6 +215,7 @@ def replace_kb(kb_id: str, body: KBReplaceRequest, _: Request) -> Dict[str, Any]
 @router.delete("/{kb_id}")
 def delete_kb(kb_id: str, _: Request) -> Dict[str, Any]:
     _flag_or_403()
+    kb_id = _safe_kb_id(kb_id)
     p = _manifests_dir() / f"{kb_id}.json"
     if not p.exists():
         raise HTTPException(404, f"Knowledge base '{kb_id}' not found")

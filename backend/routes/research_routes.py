@@ -624,7 +624,13 @@ def setup_research_routes(research_handler, session_manager=None) -> APIRouter:
                     src_type = spec.get("type")
                     if not src_type:
                         raise HTTPException(400, "source.type is required")
-                    src_config = spec.get("config") or {}
+                    src_config = dict(spec.get("config") or {})
+                    # User-scoped sources (Library, Previous chats) need the
+                    # current user's identity to filter their data. Inject
+                    # `owner` here so the Source classes stay route-agnostic
+                    # and can be unit-tested without an HTTP request.
+                    if src_type in ("library", "chats"):
+                        src_config.setdefault("owner", user or "")
                     sources.append(registry.get(src_type, src_config))
             except HTTPException:
                 raise
