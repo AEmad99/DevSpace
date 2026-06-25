@@ -27,6 +27,7 @@ from src.research_sources import registry
 from src.research_sources.base import Finding, SourceRef
 from src.research_sources.library import LibrarySource
 from src.research_sources.previous_chats import PreviousChatsSource
+from src.research_sources.documents import DocumentsSource
 
 
 # ----------------------------------------------------------------------
@@ -440,6 +441,92 @@ def test_chats_source_retrieve_returns_findings():
         findings = asyncio_run(src.retrieve(["pasta"], question="how do I", limit=3))
     assert findings
     assert all(f.ref.source_id == "chats" for f in findings)
+
+
+# ----------------------------------------------------------------------
+# DocumentsSource
+# ----------------------------------------------------------------------
+
+
+def test_documents_source_registers_in_registry():
+    assert "documents" in registry.types()
+    src = registry.get("documents", {"owner": "alice"})
+    assert isinstance(src, DocumentsSource)
+    assert src.type_id == "documents"
+
+
+def test_documents_source_default_config():
+    src = DocumentsSource({"owner": "alice"})
+    assert src.owner == "alice"
+    assert src.collection_name == "documents_alice"
+
+
+def test_documents_source_empty_collection_name_for_single_user():
+    src = DocumentsSource({"owner": ""})
+    assert src.collection_name == "documents_default"
+
+
+def test_documents_source_warmup_and_retrieve():
+    """Warmup walks the Document table and embeds active docs; retrieve finds them."""
+    fake_doc = type("D", (), {})()
+    fake_doc.id = "d1"
+    fake_doc.title = "Pasta notes"
+    fake_doc.current_content = "Fresh pasta is made from flour and eggs. " * 20
+    fake_doc.updated_at = None
+    fake_doc.is_active = True
+    fake_doc.archived = False
+    fake_doc.owner = "alice"
+
+    # Minimal SQLAlchemy column/expression stand-ins (mirror the chats fakes).
+    class _Expr:
+        def __init__(self, tag): self.tag = tag
+        def __or__(self, other): return _Expr(("or", self.tag, other))
+        def __and__(self, other): return _Expr(("and", self.tag, other))
+        def __ror__(self, other): return _Expr(("or", other, self.tag))
+    class _ColDesc(_Expr):
+        def __init__(self, name): super().__init__(("desc", name))
+        def nullslast(self): return _Expr(("nullslast", self.tag))
+    class _Col:
+        def __init__(self, name): self.name = name
+        def desc(self): return _ColDesc(self.name)
+        def is_(self, other): return _Expr(("is", self.name, other))
+        def __eq__(self, other): return _Expr(("eq", self.name, other))
+        def __or__(self, other): return _Expr(("or", self.name, other))
+
+    class FakeDocument:
+        is_active = _Col("is_active")
+        archived = _Col("archived")
+        owner = _Col("owner")
+        updated_at = _Col("updated_at")
+        current_content = _Col("current_content")
+
+    class FakeQuery:
+        def filter(self, *a, **kw): return self
+        def order_by(self, *a, **kw): return self
+        def limit(self, *a, **kw): return self
+        def all(self): return [fake_doc]
+
+    fake_db = MagicMock()
+    fake_db.query.return_value = FakeQuery()
+
+    src = DocumentsSource({"owner": "alice"})
+    lane = FakeLane()
+    with patch.dict("sys.modules", {
+        "core": MagicMock(),
+        "core.database": MagicMock(
+            Document=FakeDocument,
+            SessionLocal=MagicMock(return_value=fake_db),
+        ),
+    }), patch.object(src, "_resolve_lane", return_value=lane):
+        asyncio_run(src.warmup())
+        findings = asyncio_run(src.retrieve(["pasta flour eggs"], question="how", limit=3))
+
+    ids = list(lane.collection._items.keys())
+    assert any("d1" in cid for cid in ids), "document d1 should be indexed"
+    assert findings, "retrieve should surface chunks from the document"
+    assert all(f.ref.source_id == "documents" for f in findings)
+    assert "d1" in findings[0].ref.location
+    assert findings[0].ref.location.startswith("document://")
 
 
 # ----------------------------------------------------------------------

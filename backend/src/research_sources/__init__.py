@@ -21,6 +21,7 @@ from . import codebase  # noqa: F401  -- registers CodebaseSource (M3)
 from . import knowledge_base  # noqa: F401  -- registers KnowledgeBaseSource (M4)
 from . import library   # noqa: F401  -- registers LibrarySource (search user's saved research)
 from . import previous_chats  # noqa: F401  -- registers PreviousChatsSource (search user's chat history)
+from . import documents  # noqa: F401  -- registers DocumentsSource (search user's documents)
 
 __all__ = [
     "Finding",

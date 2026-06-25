@@ -153,6 +153,8 @@ function addPickerRow(list, maxSources, preset) {
       delete row.dataset.pendingReportIds;
     } else if (type === 'chats') {
       _renderChatsConfig(cfg, state);
+    } else if (type === 'documents') {
+      _renderDocumentsConfig(cfg, state);
     } else if (type === 'codebase' || type === 'folder') {
       _renderCodebaseConfig(cfg, state);
     } else {
@@ -173,7 +175,8 @@ function _buildTypeOptions(state, preset) {
   // The hardcoded order: internet first (default), then user-content sources
   // (chats, library, codebase, folder, kb). The order matters because the
   // dropdown is the user's mental model of "what can I search?".
-  const order = ['internet', 'chats', 'library', 'codebase', 'folder', 'kb'];
+  // Order mirrors the Library panel's tabs: Chats, Documents, Research.
+  const order = ['internet', 'chats', 'documents', 'library', 'codebase', 'folder', 'kb'];
   const byType = new Map(all.map(s => [s.type, s]));
   for (const t of order) {
     if (t === 'internet') {
@@ -185,8 +188,13 @@ function _buildTypeOptions(state, preset) {
       options.push('<option value="chats">Previous Chats</option>');
       continue;
     }
+    if (t === 'documents') {
+      // documents is registered in src/research_sources/documents.py
+      options.push('<option value="documents">Documents</option>');
+      continue;
+    }
     if (t === 'library') {
-      options.push('<option value="library">Library (Research Reports)</option>');
+      options.push('<option value="library">Research Reports</option>');
       continue;
     }
     if (t === 'codebase') {
@@ -309,6 +317,16 @@ function _renderChatsConfig(cfg, state) {
   const note = document.createElement('span');
   note.className = 'note';
   note.textContent = 'Searches all of your chat sessions.';
+  cfg.appendChild(note);
+}
+
+function _renderDocumentsConfig(cfg, state) {
+  // No config UI — the source always searches all of the user's documents
+  // (the Library → Documents tab). Show a small note for clarity.
+  void state;
+  const note = document.createElement('span');
+  note.className = 'note';
+  note.textContent = 'Searches all of your documents.';
   cfg.appendChild(note);
 }
 
@@ -563,6 +581,8 @@ export function readPickerSelection(rootEl) {
       config.report_ids = checked;
     } else if (type === 'chats') {
       // No config — the source always searches every session.
+    } else if (type === 'documents') {
+      // No config — the source always searches every document.
     } else if (type === 'codebase' || type === 'folder') {
       // The workspace selector writes the chosen path to row.dataset.workspacePath
       // (or the user typed a custom path into the text input). Empty path = skip.

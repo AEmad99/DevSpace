@@ -1143,6 +1143,10 @@ function _buildJobCard(job) {
           // follow-up-chat flow uses).
           window.location.hash = '#' + id;
           window.location.reload();
+        } else if (scheme === 'documents') {
+          // Open the document in-place — the document module listens for the
+          // #document-<id> deep-link hash and loads it (no reload needed).
+          window.location.hash = '#document-' + id;
         }
       });
     });
@@ -1402,7 +1406,7 @@ function _safeSourceHref(raw) {
 // that the desktop webview can't navigate. Parse them so the click handler can
 // route to openResearchReport()/the chat session instead of leaving a dead link.
 function _internalCite(raw) {
-  const m = /^(library|chats):\/\/([^#?]+)/.exec(String(raw || '').trim());
+  const m = /^(library|chats|documents):\/\/([^#?]+)/.exec(String(raw || '').trim());
   return m ? { scheme: m[1], id: m[2] } : null;
 }
 // _esc() escapes <>& but not quotes; harden for double-quoted attributes.
