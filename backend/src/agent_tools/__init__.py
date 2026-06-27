@@ -23,7 +23,10 @@ from .web_tools import WebSearchTool, WebFetchTool
 from .filesystem_tools import ReadFileTool, WriteFileTool, EditFileTool, LsTool, GlobTool, GrepTool, GetWorkspaceTool
 from .document_tools import CreateDocumentTool, UpdateDocumentTool, EditDocumentTool, SuggestDocumentTool, ManageDocumentTool
 from .model_interaction_tools import ChatWithModelTool, AskTeacherTool, ListModelsTool
-# Code-quality tools (Phase 0 stubs - return {"error":"not implemented"}; Phase 4 fills).
+# Code-quality tools: auto-detect the project's test runner / linter /
+# formatter (pytest, npm test, go test, cargo test, ruff, eslint, prettier,
+# black, …) and run it through `spawn_shell` with the same streaming +
+# timeout plumbing as `bash`. Real implementations — see code_quality_tools.py.
 from .code_quality_tools import RunTestsTool, LintTool, FormatTool
 # Git tools — first-class git_status / git_diff / git_log / git_blame /
 # git_commit / git_branch so the agent doesn't have to shell out.
@@ -56,7 +59,7 @@ TOOL_HANDLERS = {
     "chat_with_model": ChatWithModelTool().execute,
     "ask_teacher": AskTeacherTool().execute,
     "list_models": ListModelsTool().execute,
-    # Code-quality tools (Phase 0 stubs; Phase 4 implements).
+    # Code-quality tools: auto-detect runner/linter/formatter and shell out.
     "run_tests": RunTestsTool().execute,
     "lint": LintTool().execute,
     "format": FormatTool().execute,
@@ -117,7 +120,7 @@ TOOL_TAGS = {"bash", "python", "web_search", "web_fetch", "read_file", "write_fi
               # gallery, email folders, etc.) — agent uses this when
               # there's no named tool wrapper for the action.
               "app_api",
-              # Code-quality tools (Phase 0 stubs; Phase 4 implements).
+              # Code-quality tools (auto-detect runner/linter/formatter).
               "run_tests", "lint", "format",
               # Git tools (workspace-scoped, prefer these over `bash git …`
               # when the common-case command covers it).

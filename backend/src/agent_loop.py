@@ -9,9 +9,11 @@ The LLM decides when to use tools by writing fenced code blocks.
 import asyncio
 import collections
 import json
+import os
 import re
 import time
 import logging
+from types import SimpleNamespace
 from typing import AsyncGenerator, List, Dict, Optional, Set
 from urllib.parse import urlparse
 
@@ -64,11 +66,18 @@ def _is_strict_review_mode() -> bool:
     the settings read so callers (the SSE edit_pending emitter, future
     strict-only UI hooks) can branch on a single, cached flag instead of
     re-parsing settings.json on every tool call. Auto mode (default) is the
-    silent-apply flow — no approval prompts, no edit_pending events."""
+    silent-apply flow — no approval prompts, no edit_pending events.
+
+    Mirrors filesystem_tools._edit_review_mode's defensive parsing so
+    corrupted settings can't flip the agent into strict mode by
+    accident (see that helper for the full rationale)."""
     try:
-        return (get_setting("agent_edit_review") or "auto").strip().lower() == "strict"
+        raw = get_setting("agent_edit_review")
     except Exception:
         return False
+    if not isinstance(raw, str):
+        return False
+    return raw.strip().lower() == "strict"
 
 # System prompt that tells the LLM about available tools.
 # Always injected — the LLM decides whether to use them.
@@ -274,13 +283,47 @@ _DOMAIN_RULES = {
 - Odysseus chats are sessions. Use `list_sessions`/`manage_session`; do not shell out looking for chat files.
 - Preserve clickable session links from tool output in your final answer.""",
     "files": """\
-## File & coding-agent rules
+## File & coding-agent rules (HARNESS MODE)
+You are operating as a coding-agent harness. For any multi-step coding task:
+1. EXPLORE FIRST. Before editing, run `grep`/`glob`/`read_file` on the
+   relevant files. Don't guess structure. If a workspace is active, the
+   loop has already loaded the project profile (test runner, lint,
+   conventions) into the system prompt — use it instead of re-discovering.
+2. PLAN. At the start of a multi-step task, call `manage_todos` with a
+   concrete checklist. Keep exactly one item `in_progress`; tick items
+   `done` as you complete them. The harness re-injects this list at
+   checkpoints and after verifier failures so you don't lose the thread.
+3. EDIT DELIBERATELY. Make focused `edit_file`/`write_file` changes. Each
+   edit's diff is shown back to you — read it before assuming success.
+4. VERIFY AFTER EVERY EDIT. After each edit, the next action should be
+   `run_tests` (or `lint`/`format`) on the affected files. The harness
+   will block further edits until a verify tool succeeds. Iterate
+   test→fix→test until green. Re-running the same test after a fix is
+   the loop converging, not spinning — that's expected. Repeating an
+   IDENTICAL no-op call is what to avoid.
+5. COMMIT WHEN GREEN. Once tests pass, use `git_commit` with a message
+   describing what changed and why. Don't leave work uncommitted at the
+   end of a turn unless the user asked you to stop and review.
+6. DON'T STOP MID-TASK. The loop auto-continues. Don't ask "should I
+   proceed?" — keep going. Three ways to end: (a) DONE — every concrete
+   deliverable the user asked for actually exists and is verified;
+   (b) BLOCKED — capability missing, permission denied, data unobtainable,
+   state plainly what's blocking you; (c) the single most useful next
+   action. Never trail off mid-task.
+7. DELEGATE WHEN APPROPRIATE. For a heavy, self-contained sub-task (a
+   big codebase search, or one independent module to implement), use
+   `spawn_agent` to delegate it to a focused sub-agent. Pass a complete
+   prompt with the goal + context + expected output format. The sub-agent
+   runs autonomously and returns only its final report — so your context
+   stays clean. Choose `agent_type`: `explore` for read-only research,
+   `code` for an implementation that must leave tests green, `general`
+   for mixed/scoped work.
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
 - Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.
-- WORK LIKE A CODING AGENT. For any multi-step coding task: (1) briefly explore first (grep/glob/read the relevant files) before editing — don't guess; (2) at the start, call `manage_todos` with a concrete checklist and keep exactly one item `in_progress`, ticking items `done` as you go; (3) make focused `edit_file` changes, then VERIFY with `run_tests`/`lint` and fix what breaks — iterate test→fix→test until green; (4) keep going on your own through every step. You have a large step budget and the loop auto-continues, so DO NOT stop after one edit to ask if you should proceed, and DO NOT declare done until the whole task is implemented and verified. Only stop when it's actually finished, or you're genuinely blocked.
-- Re-running the same test/lint/command after a fix is EXPECTED and good — that's the loop converging, not spinning. Repeating an identical no-op call that changes nothing is what to avoid.
-- For a heavy, self-contained sub-task (e.g. searching a big codebase to answer one question, or implementing one independent module), use `spawn_agent` to delegate it to a focused sub-agent and get back just the result — this keeps your context clean. Give it a complete prompt; it runs autonomously and won't ask you questions.""",
+- For a trivially obvious fix (typo / comment / single-line), make the
+  change AND note in one sentence why no test was run before marking the
+  todo done.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -1015,6 +1058,7 @@ def _build_system_prompt(
     owner: Optional[str] = None,
     suppress_local_context: bool = False,
     active_email: Optional[Dict[str, str]] = None,
+    workspace: Optional[str] = None,
 ) -> List[Dict]:
     """Build agent system prompt, inject MCP/document context, merge consecutive system msgs."""
     global _cached_base_prompt, _cached_base_prompt_key
@@ -1267,6 +1311,55 @@ def _build_system_prompt(
         _email_message = untrusted_context_message("active email reader", email_ctx)
         _email_message["_protected"] = True
 
+    # HARNESS: auto-call project_bootstrap when a workspace is active. Gives
+    # the model project conventions, test runner, lint, and entry points
+    # BEFORE its first tool call, so it never has to guess. Idempotent via
+    # project_bootstrap_cached (mtime-keyed, in-process), so repeated turns
+    # in the same workspace are free. Skipped when local context is
+    # suppressed (guide-only / plan-mode don't have it) and when
+    # project_bootstrap isn't in the active tool set (RAG may have trimmed
+    # it for a non-coding turn).
+    _bootstrap_message = None
+    if (not suppress_local_context
+            and workspace and "project_bootstrap" in (relevant_tools or set())):
+        try:
+            from src.agent_tools.project_tools import project_bootstrap_cached
+            from src.constants import MAX_OUTPUT_CHARS
+            _bs = project_bootstrap_cached(workspace) or {}
+            if _bs and not _bs.get("error"):
+                _lines = [f"# Project profile for {workspace}",
+                          f"type={_bs.get('type', '?')} language={_bs.get('language', '?')} "
+                          f"package_manager={_bs.get('package_manager', '?')}"]
+                if _bs.get("test_runner"):
+                    _lines.append(f"test_runner: {_bs.get('test_runner')}")
+                if _bs.get("lint_command"):
+                    _lines.append(f"lint_command: {_bs.get('lint_command')}")
+                if _bs.get("format_command"):
+                    _lines.append(f"format_command: {_bs.get('format_command')}")
+                if _bs.get("entry_points"):
+                    _eps = _bs["entry_points"][:8]
+                    _lines.append(f"entry_points: {', '.join(_eps)}")
+                if _bs.get("instructions_files"):
+                    _ifs = _bs["instructions_files"][:5]
+                    _lines.append(f"instruction_files: {', '.join(_ifs)}")
+                if _bs.get("conventions"):
+                    _lines.append(f"conventions: {_bs['conventions']}")
+                _bootstrap_ctx = (
+                    "Trusted project profile (auto-loaded by the harness — already on disk, "
+                    "no need to re-fetch unless you need full content of one of these files):\n"
+                    + "\n".join(_lines)
+                    + "\nUse this to pick the right `run_tests`/`lint`/`format` invocation "
+                    "and to follow existing conventions. Do NOT regenerate this with another tool.\n"
+                )
+                _bootstrap_ctx = _bootstrap_ctx[:MAX_OUTPUT_CHARS]
+                # Use the module-level import — a local `from … import` here
+                # would shadow the module-level binding and UnboundLocalError
+                # at every later reference in this function (skills, docs).
+                _bootstrap_message = untrusted_context_message("project profile", _bootstrap_ctx)
+                _bootstrap_message["_protected"] = True
+        except Exception as e:
+            logger.debug("[bootstrap] auto-bootstrap failed (non-fatal): %s", e)
+
     # Inject writing style for any email writing path. This is deliberately
     # broader than read/list: models may compose via send_email, reply_to_email,
     # or ui_control open_email_reply after the first tool round.
@@ -1479,6 +1572,9 @@ def _build_system_prompt(
         last_user_idx += 1
     if _skills_message:
         merged.insert(last_user_idx, _skills_message)
+        last_user_idx += 1
+    if _bootstrap_message:
+        merged.insert(last_user_idx, _bootstrap_message)
         last_user_idx += 1
     if _datetime_message:
         merged.insert(last_user_idx, _datetime_message)
@@ -2334,6 +2430,7 @@ async def stream_agent_loop(
         owner=owner,
         suppress_local_context=guide_only,
         active_email=active_email,
+        workspace=workspace,
     )
     if plan_mode and not guide_only:
         # Steer the model to investigate-then-propose. Hard tool gating handles
@@ -2472,19 +2569,22 @@ async def stream_agent_loop(
     _intent_nudge_count = 0
     _MAX_INTENT_NUDGES = 2
 
-    # ── Edit-then-verify soft tracker ──
-    # A coding agent that edits twice in a row without running tests/lint is
-    # likely to ship a broken file. The prompt already says "edit→test→fix
-    # until green" but local models frequently skip verification. Track
-    # consecutive edits since the last verify and, at the start of the next
-    # round, inject a one-time nudge (not a hard block — would false-positive
-    # on small one-line edits that don't need tests). The nudge is logged
-    # in metrics so we can chart how often it fires.
-    _edits_since_verify = 0
-    _verify_nudge_count = 0
-    _MAX_VERIFY_NUDGES = 1
-    _EDIT_TOOLS = frozenset({"edit_file", "write_file"})
-    _VERIFY_TOOLS = frozenset({"run_tests", "lint", "format"})
+    # ── Edit-then-verify harness tracker ──
+    # Extracted to src.agent_harness so the policy is unit-testable
+    # without driving the whole agent loop. The harness owns the counter,
+    # nudge-vs-block decision, and per-round schema filter.
+    from src.agent_harness import (
+        EditVerifyHarness,
+        EDIT_TOOLS as _EDIT_TOOLS,
+        VERIFY_TOOLS as _VERIFY_TOOLS,
+        should_auto_verify as _should_auto_verify,
+        nudge_message as _nudge_message,
+        block_message as _block_message,
+        verifier_fail_message as _verifier_fail_message,
+        tool_fail_message as _tool_fail_message,
+    )
+    _harness = EditVerifyHarness()
+    _auto_verify_pending = 0      # HARNESS: queued run_tests injections
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
@@ -2614,6 +2714,15 @@ async def stream_agent_loop(
                     if t.get("function", {}).get("name") not in disabled_tools
                     and t.get("name") not in disabled_tools
                 ]
+            # HARNESS: when the edit-verify block is active, hide the edit
+            # tools from this round's schemas so the model can only respond
+            # by running run_tests/lint/format or by ending the turn. The
+            # flag is cleared below once a verify tool runs.
+            _filtered = _harness.filter_schemas(all_tool_schemas)
+            if len(_filtered) < len(all_tool_schemas):
+                logger.info("[agent] harness: hid %d edit tool(s) for verify-block round",
+                            len(all_tool_schemas) - len(_filtered))
+                all_tool_schemas = _filtered
         else:
             # Local: only MCP schemas when message suggests MCP tool usage
             _last_content = _last_user.lower()
@@ -2936,14 +3045,13 @@ async def stream_agent_loop(
                     _note = "\n\n_Double-checked the work and found something to fix._\n\n"
                     yield f'data: {json.dumps({"delta": _note})}\n\n'
                     full_response += _note
+                    # HARNESS: re-inject the open TODO checklist so the model
+                    # has its plan visible while recovering from a verifier
+                    # fail. Same `_todos_md` text used at auto-continue
+                    # checkpoints — this keeps the recovery on-rails.
                     messages.append({
                         "role": "system",
-                        "content": (
-                            "An independent verifier reviewed your work against the "
-                            "original request and found issues that must be fixed before "
-                            "this is actually done:\n- " + "\n- ".join(_vfail) +
-                            "\n\nFix these now using tools, then finish."
-                        ),
+                        "content": _verifier_fail_message(_vfail, _todos_md),
                     })
                     # Require fresh effectful work before verifying again, so we
                     # never re-verify an unchanged state in a loop.
@@ -2990,37 +3098,39 @@ async def stream_agent_loop(
                 # Visible signal in the stream so the user knows we caught it.
                 yield f'data: {json.dumps({"type": "agent_step", "round": round_num + 1})}\n\n'
                 continue
-            # ── Edit-then-verify nudge (soft) ──
-            # Only fires when the model has run 2+ consecutive file edits with
-            # no run_tests / lint / format in between. Capped at one nudge per
-            # turn (subsequent rounds can continue if the model is still
-            # legitimately working on small tweaks that don't need tests).
-            if (
-                _edits_since_verify >= 2
-                and _verify_nudge_count < _MAX_VERIFY_NUDGES
-                and not guide_only
-            ):
-                _verify_nudge_count += 1
+            # ── Edit-then-verify harness enforcement ──
+            # Three-stage escalation: (1) after 1+ edit without verify, inject
+            # a soft nudge; (2) after the nudge is delivered and still no
+            # verify on the next round, REMOVE edit_file/write_file from the
+            # tool schemas for one round so the model can only respond by
+            # running run_tests/lint/format (or explaining why not); (3) on
+            # any verify call, schemas reappear. The block is one-round only
+            # so the model can't get permanently locked out.
+            if _harness.nudge_round() and not guide_only:
                 logger.info(
                     f"[agent] edit-then-verify nudge on round {round_num} "
-                    f"({_edits_since_verify} edits since last verify)"
+                    f"({_harness.edits_since_verify} edits since last verify)"
                 )
-                messages.append({
-                    "role": "system",
-                    "content": (
-                        "You've made multiple file edits in a row without "
-                        "running the project's tests or linter. For a coding "
-                        "task, the edit→test→fix loop is the whole point — "
-                        "a green test run is what proves the change actually "
-                        "works. Run `run_tests` (or `lint`/`format`) on the "
-                        "affected files now, then iterate. If the change is "
-                        "trivially obvious (typo / comment / single-line) and "
-                        "doesn't warrant a test run, say so in one sentence "
-                        "and end the turn."
-                    ),
-                })
+                messages.append({"role": "system", "content": _nudge_message()})
                 # Don't `continue` — let the loop continue normally after the
                 # nudge; the message is in the context for the next round.
+            elif (
+                "run_tests" in (_relevant_tools or set())
+                and not guide_only
+                and _harness.block_round()
+            ):
+                # Escalate: hide the edit tools for one round so the model
+                # has to acknowledge the verify requirement before editing
+                # again. The flag is read by the schema-filter block above
+                # via _harness.filter_schemas().
+                logger.info(
+                    f"[agent] edit-then-verify BLOCK round {round_num} "
+                    f"(edits={_harness.edits_since_verify} nudges_used={_harness.verify_nudge_count})"
+                )
+                messages.append({"role": "system", "content": _block_message()})
+            # Reset the block as soon as the model runs any verify tool
+            # (counter is reset at the call site below when block.tool_type
+            # is in _VERIFY_TOOLS; we just clear the flag there too).
             break  # no tools — done
 
         # ── Loop-breaker (Terminus-style stall detector) ──────────────
@@ -3519,12 +3629,25 @@ async def stream_agent_loop(
                 _effectful_used = True
             if block.tool_type in _PROGRESS_EFFECTFUL_TOOLS:
                 _round_effectful = True
-            # ── Edit-then-verify tracker ──
-            # Count consecutive edits since the last verify. Reset on verify.
-            if block.tool_type in _EDIT_TOOLS:
-                _edits_since_verify += 1
-            elif block.tool_type in _VERIFY_TOOLS:
-                _edits_since_verify = 0
+            # HARNESS: tool-fail nudge for edit/verify tools only. Other tool
+            # failures are handled by the agent's own prompt rule (retry or
+            # declare blocked). When an edit or verify fails, re-inject the
+            # open TODO list so the model has its checklist visible while
+            # figuring out the fix — same _todos_md reuse as the verifier-fail
+            # branch. Capped at one nudge per round (no recursion if the
+            # message we just appended is also at the end).
+            _ec = result.get("exit_code") if isinstance(result, dict) else None
+            if (
+                _ec not in (None, 0)
+                and (block.tool_type in _EDIT_TOOLS or block.tool_type in _VERIFY_TOOLS)
+                and _todos_md and _todos_md.strip()
+            ):
+                messages.append({
+                    "role": "system",
+                    "content": _tool_fail_message(block.tool_type, _ec, _todos_md),
+                })
+                logger.info("[agent] harness: re-injected TODOs on %s fail (round %d, exit=%s)",
+                            block.tool_type, round_num, _ec)
 
             # ── Progress tracking for the loop-breaker ──────────────────
             # A call "made progress" if it's brand-new OR its output changed
@@ -3543,6 +3666,65 @@ async def stream_agent_loop(
             formatted = format_tool_result(desc, result)
             tool_results.append(formatted)
             tool_result_texts.append(formatted)
+
+            # HARNESS: feed tool outcome into the edit-verify state machine
+            # BEFORE the tool-fail nudge check below so it sees the up-to-date
+            # counter. Only successful calls count (failed calls are handled by
+            # the tool-fail nudge separately).
+            if result.get("exit_code") in (None, 0):
+                if block.tool_type in _EDIT_TOOLS:
+                    _harness.record_edit()
+                    # HARNESS: queue a synthetic run_tests block on the NEXT
+                    # round so the model sees fresh test output before its
+                    # next edit. Only fires when the setting/workspace opt-in
+                    # is on.
+                    if (
+                        _should_auto_verify(workspace)
+                        and "run_tests" in (_relevant_tools or set())
+                    ):
+                        _auto_verify_pending += 1
+                elif block.tool_type in _VERIFY_TOOLS:
+                    _harness.record_verify()
+
+        # HARNESS: when auto-verify is on AND an edit just landed, run
+        # `run_tests` ourselves before the model's next round so the model
+        # sees fresh test output before its next edit. We invoke the tool
+        # via the same dispatcher the model uses, so behaviour is identical.
+        # Capped at one auto-verify per round (don't run twice in one turn
+        # if the model already issued a run_tests).
+        if (
+            _auto_verify_pending > 0
+            and "run_tests" in (_relevant_tools or set())
+            and not guide_only
+            and not any(b.tool_type == "run_tests" for b in tool_blocks)
+        ):
+            try:
+                _av_call = SimpleNamespace(tool_type="run_tests", content="")
+                _av_desc, _av_result = await execute_tool_block(
+                    _av_call, session_id=session_id,
+                    disabled_tools=disabled_tools, owner=owner,
+                    workspace=workspace, tool_policy=tool_policy,
+                    agent_endpoint=agent_endpoint, agent_model=model,
+                    agent_headers=headers, subagent_depth=subagent_depth,
+                )
+                _av_formatted = format_tool_result(_av_desc, _av_result)
+                _auto_verify_note = (
+                    "\n\n_Harness auto-ran `run_tests` after your last edit "
+                    "(set `agent_auto_verify=false` to opt out). Result below._\n"
+                )
+                # Append to the assistant-side delta so the user sees it
+                # inline, and stash the formatted result on the next round's
+                # message context so the model can act on it.
+                yield f'data: {json.dumps({"delta": _auto_verify_note})}\n\n'
+                full_response += _auto_verify_note
+                messages.append({"role": "assistant", "content": _auto_verify_note})
+                messages.append({"role": "user", "content": _av_formatted})
+                _harness.record_verify()  # count auto-run as a verify pass
+                logger.info("[agent] harness: auto-verify ran run_tests after edit (round %d)", round_num)
+            except Exception as e:
+                logger.warning("[agent] harness auto-verify failed: %s", e)
+            finally:
+                _auto_verify_pending = max(0, _auto_verify_pending - 1)
 
         # Hand this round's progress signals to next round's loop-breaker.
         _last_round_effectful = _round_effectful

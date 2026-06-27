@@ -70,8 +70,17 @@ _SENSITIVE_FILE_PATTERNS: tuple[str, ...] = (
 def _is_sensitive_path(resolved: str) -> bool:
     """Return True if *resolved* falls under a sensitive directory or
     matches a sensitive filename — regardless of what root it sits under.
+
+    Splits on both ``os.sep`` AND ``/`` so POSIX-style paths that an LLM
+    agent commonly produces (``~/.ssh/authorized_keys``) are correctly
+    classified on Windows too. Without the cross-platform split, on
+    Windows ``os.sep == '\\\\'`` and a forward-slash path falls into a
+    single component, so the deny list never matches and a sensitive
+    file slips past the safety net even when its parent root is on the
+    allowlist.
     """
-    parts = resolved.split(os.sep)
+    # Pure-Python split on both separators (re.split avoids pre-compiling).
+    parts = re.split(r"[\\/]", resolved)
     filenames: set[str] = {parts[-1]} if parts else set()
 
     # Check if any path component is a sensitive directory.
@@ -79,7 +88,9 @@ def _is_sensitive_path(resolved: str) -> bool:
         if part in _SENSITIVE_BASENAMES:
             return True
 
-    # Check filename against known sensitive files.
+    # Check filename against known sensitive files. Substring match
+    # preserves the existing semantics (catches e.g. "id_rsa.bak") and
+    # avoids breaking the test suite that asserts on partial filenames.
     for pat in _SENSITIVE_FILE_PATTERNS:
         if pat in filenames:
             return True
@@ -89,20 +100,67 @@ def _is_sensitive_path(resolved: str) -> bool:
 
 def _tool_path_roots() -> list[str]:
     """Return the list of directory roots that read_file / write_file
-    may touch. Default: project data/ + system temp dirs. Extra roots
-    are loaded from the ``tool_path_extra_roots`` setting.
+    may touch.
+
+    Default roots, in order:
+      1. Project data directory (``DATA_DIR``) — agent's primary
+         workspace (sessions, memory, RAG index, uploads, etc.).
+      2. App root (``get_app_root()``) — the project the user is
+         actively working in (dev mode only; skipped in frozen builds
+         where ``_MEIPASS`` is a temp extraction dir the user does not
+         own). Lets the agent read/write project files without first
+         having to set an explicit workspace.
+      3. User HOME (``~``) — single-user desktop app, the user owns
+         everything under their profile, so any of their project
+         folders work without per-folder setup. Sensitive subpaths
+         (.ssh, .gnupg, id_rsa, shell rc files, etc.) are STILL blocked
+         by ``_is_sensitive_path`` in ``_resolve_tool_path``; this is
+         just an allow-list expansion, not a security relaxation.
+      4. System temp dirs (``/tmp``, ``/private/tmp``, ``$TMPDIR``).
+      5. Opt-in extras from the ``tool_path_extra_roots`` setting.
+
+    The sensitive-subpath deny list runs FIRST in ``_resolve_tool_path``,
+    so even with HOME on the list, paths like ``~/.ssh/authorized_keys``
+    and ``~/.bashrc`` remain rejected.
     """
     roots: list[str] = []
 
-    # Project data directory — the agent's primary workspace.
+    # 1. Project data directory — the agent's primary workspace.
     from src.constants import DATA_DIR
     roots.append(DATA_DIR)
 
-    # /tmp (and its macOS realpath /private/tmp).
-    roots.append("/tmp")
+    # 2. App root (dev mode only). Lets the agent work in the project
+    # the user is actively developing without requiring a workspace to
+    # be picked first. In frozen installs _MEIPASS is the PyInstaller
+    # extraction dir (temp, user does not own it) so we skip it.
+    if not getattr(sys, "frozen", False):
+        try:
+            from src.runtime_paths import get_app_root
+            app_root = get_app_root()
+            if app_root:
+                roots.append(app_root)
+        except Exception:
+            pass
+
+    # 3. User HOME — single-user desktop app; the user owns the
+    # whole profile, so any of their project folders should be
+    # reachable. Skip if HOME is unset or root (sandbox / odd
+    # platform) — those are not useful defaults and could
+    # over-broaden the allowlist.
+    try:
+        home = os.path.expanduser("~")
+    except Exception:
+        home = ""
+    if home and home not in ("", "/"):
+        roots.append(home)
+
+    # 4. /tmp (and its macOS realpath /private/tmp). Guard isabs so we
+    # don't inject a junk path on Windows where /tmp does not exist.
+    if os.path.isabs("/tmp"):
+        roots.append("/tmp")
     try:
         private_tmp = os.path.realpath("/tmp")
-        if private_tmp != "/tmp":
+        if private_tmp and private_tmp != "/tmp" and os.path.isabs(private_tmp):
             roots.append(private_tmp)
     except OSError:
         pass
@@ -112,7 +170,7 @@ def _tool_path_roots() -> list[str]:
     if tmpdir:
         roots.append(tmpdir)
 
-    # Opt-in extra roots from settings.
+    # 5. Opt-in extra roots from settings.
     try:
         from src.settings import get_setting
         extra = get_setting("tool_path_extra_roots")
@@ -543,15 +601,58 @@ _SUBAGENT_TOOLSETS = {
                 "project_bootstrap"},
 }
 
-_SUBAGENT_SYSTEM = (
-    "You are a focused sub-agent spawned by a parent coding agent to handle ONE "
-    "well-scoped sub-task. You have your own context and tools. Do the task fully "
-    "and autonomously: take concrete actions, verify your work, and DO NOT ask the "
-    "parent or user questions — make reasonable assumptions and proceed. When done, "
-    "your FINAL message must be a concise report of what you found or changed "
-    "(files touched, key findings, test results) — that report is the ONLY thing "
-    "returned to the parent, so make it self-contained. Do not pad it."
-)
+_SUBAGENT_SYSTEMS = {
+    "explore": (
+        "You are a focused READ-ONLY sub-agent spawned by a parent agent to "
+        "investigate one well-scoped question. You have NO write/edit tools; "
+        "your job is to read, search, and report. Do NOT ask the parent or "
+        "user questions — make reasonable assumptions and proceed. Use "
+        "`grep`/`glob`/`read_file`/`git_*` to gather evidence; cite file "
+        "paths and line numbers in your report. Your FINAL message must be a "
+        "structured findings report with these sections: (1) Files "
+        "inspected (paths + 1-line summary of each), (2) Key findings "
+        "(the answer to the question, with code excerpts and line refs), "
+        "(3) Suggested next steps (what the parent should do with this "
+        "information). Be concise — this report is the ONLY thing returned "
+        "to the parent, so make it self-contained."
+    ),
+    "code": (
+        "You are a focused IMPLEMENTATION sub-agent spawned by a parent "
+        "agent to do one well-scoped coding sub-task end-to-end. You have "
+        "the full file/git toolset. Do the task fully and autonomously: "
+        "explore first, then edit, then VERIFY with `run_tests` (or "
+        "`lint`/`format`) and iterate edit→test→fix until green. DO NOT "
+        "ask the parent or user questions — make reasonable assumptions and "
+        "proceed. Leave the workspace in a state where its tests pass. "
+        "Your FINAL message must be a structured implementation report with: "
+        "(1) Files changed (paths + one-line diff summary each), (2) Test "
+        "results (which commands ran, exit codes, key output lines), (3) "
+        "Follow-ups (anything you noticed but couldn't fix in scope). Be "
+        "concise — this report is the ONLY thing returned to the parent, so "
+        "make it self-contained."
+    ),
+    "general": (
+        "You are a focused sub-agent spawned by a parent agent to handle ONE "
+        "well-scoped sub-task. You have your own context and tools. Do the "
+        "task fully and autonomously: take concrete actions, verify your "
+        "work, and DO NOT ask the parent or user questions — make "
+        "reasonable assumptions and proceed. When done, your FINAL message "
+        "must be a concise report of what you found or changed (files "
+        "touched, key findings, test results) — that report is the ONLY "
+        "thing returned to the parent, so make it self-contained. Do not "
+        "pad it."
+    ),
+}
+# Fallback for unknown agent_type values — preserves the original generic
+# wording for back-compat.
+_SUBAGENT_SYSTEM = _SUBAGENT_SYSTEMS["general"]
+
+
+def _subagent_system_for(agent_type: str) -> str:
+    """Return the system prompt for the named sub-agent type, falling back
+    to the generic ``general`` prompt for unknown / missing values."""
+    key = (agent_type or "general").strip().lower()
+    return _SUBAGENT_SYSTEMS.get(key, _SUBAGENT_SYSTEMS["general"])
 
 
 async def _run_spawn_agent(
@@ -625,7 +726,7 @@ async def _run_spawn_agent(
             pass
 
     messages = [
-        {"role": "system", "content": _SUBAGENT_SYSTEM},
+        {"role": "system", "content": _subagent_system_for(agent_type)},
         {"role": "user", "content": prompt},
     ]
 

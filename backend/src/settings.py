@@ -139,6 +139,13 @@ DEFAULT_SETTINGS = {
     # the input-token budget and the wall-clock timeout still apply on top of it.
     "agent_auto_continue": True,
     "agent_max_rounds_ceiling": 150,
+    # HARNESS: when on, the coding-agent harness auto-queues `run_tests` after
+    # every `edit_file`/`write_file` in coding turns, so the model sees fresh
+    # test output before its next edit. Off by default — opt-in to avoid
+    # surprising users who didn't ask for it. A per-workspace override lives
+    # in `<workspace>/.devspace/auto-verify.json` ({"enabled": true}); the
+    # override takes precedence over this global setting.
+    "agent_auto_verify": False,
     # Sub-agents: let the agent spawn a nested focused agent (its own context +
     # constrained toolset) for a self-contained sub-task via the `spawn_agent`
     # tool, getting back just a summary. Keeps heavy exploration / independent
