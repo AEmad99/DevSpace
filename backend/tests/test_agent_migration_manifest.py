@@ -78,12 +78,16 @@ Use for focused git checks.
 
 
 def test_collect_skill_dir_skips_symlinked_skill_markdown(tmp_path):
+    import pytest
     migration = load_module()
     outside = tmp_path / "outside.md"
     outside.write_text("private skill content", encoding="utf-8")
     skill_path = tmp_path / "skills" / "bad" / "SKILL.md"
     skill_path.parent.mkdir(parents=True)
-    skill_path.symlink_to(outside)
+    try:
+        skill_path.symlink_to(outside)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink not permitted on this platform: {exc}")
 
     items, warnings = migration.collect_skill_dir(tmp_path / "skills", "example-agent")
 
@@ -92,11 +96,15 @@ def test_collect_skill_dir_skips_symlinked_skill_markdown(tmp_path):
 
 
 def test_collect_skill_dir_skips_symlinked_root(tmp_path):
+    import pytest
     migration = load_module()
     real_skills = tmp_path / "real-skills"
     real_skills.mkdir()
     linked_skills = tmp_path / "skills"
-    linked_skills.symlink_to(real_skills, target_is_directory=True)
+    try:
+        linked_skills.symlink_to(real_skills, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink not permitted on this platform: {exc}")
 
     items, warnings = migration.collect_skill_dir(linked_skills, "example-agent")
 

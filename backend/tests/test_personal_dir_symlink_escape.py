@@ -14,6 +14,8 @@ import ast
 import os
 from pathlib import Path
 
+import pytest
+
 SRC = Path(__file__).resolve().parent.parent / "routes" / "personal_routes.py"
 
 
@@ -45,7 +47,13 @@ def test_realpath_catches_symlink_escape(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
     link = base / "escape"
-    os.symlink(outside, link)
+    try:
+        os.symlink(outside, link)
+    except (OSError, NotImplementedError) as exc:
+        # Windows without Developer Mode / admin: WinError 1314. Skip rather
+        # than fail — the unit-level assertion above already proves the
+        # source code uses realpath, which is the actual contract.
+        pytest.skip(f"symlink not permitted on this platform: {exc}")
 
     base_abs = os.path.realpath(base)  # base itself may live under a symlinked tmp
     # abspath: the symlink still looks inside base -> escape not detected

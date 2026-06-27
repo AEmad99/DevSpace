@@ -280,3 +280,103 @@ async def test_write_file_dispatch_blocks_cron(monkeypatch):
     )
     assert "outside the allowed roots" in (result.get("error") or "")
     assert result.get("exit_code") == 1
+
+
+# --- 2026-06 regression: HOME + app root are default allowed roots ---
+#
+# Bug: in dev mode the user's project (e.g. D:\\projects\\DevSpace) was outside
+# DATA_DIR (= backend/data) and /tmp, so read_file/write_file/edit_file/ls/grep/glob
+# rejected every path the agent needed with 'outside the allowed roots'.
+# Fix: _tool_path_roots() now adds the app root (dev mode only) and user HOME.
+# The sensitive-subpath deny list still runs first, so .ssh / .gnupg / id_rsa /
+# shell rc files remain blocked regardless.
+
+def test_tool_path_roots_includes_home():
+    # HOME is on the default list. Asserted by realpath so a symlinked home
+    # (e.g. /var/home/... on NixOS, or a junction on Windows) still matches.
+    from src.tool_execution import _tool_path_roots
+    home = os.path.realpath(os.path.expanduser('~'))
+    roots = [os.path.realpath(r) for r in _tool_path_roots()]
+    assert home in roots, f'expected HOME ({home}) in default roots, got {roots}'
+
+def test_tool_path_roots_includes_data_dir():
+    # DATA_DIR stays on the default list - the agent's primary workspace.
+    from src.constants import DATA_DIR
+    from src.tool_execution import _tool_path_roots
+    roots = [os.path.realpath(r) for r in _tool_path_roots()]
+    assert os.path.realpath(DATA_DIR) in roots
+
+def test_tool_path_roots_app_root_when_not_frozen(monkeypatch):
+    # In dev (non-frozen) mode the app root (= repo root for source runs)
+    # is on the list so the agent can work on the project the user is
+    # actively developing in. Skipped in frozen builds because _MEIPASS
+    # is a PyInstaller temp extraction dir.
+    import sys as _sys
+    monkeypatch.setattr(_sys, 'frozen', False, raising=False)
+    from src.tool_execution import _tool_path_roots
+    from src.runtime_paths import get_app_root
+    roots = [os.path.realpath(r) for r in _tool_path_roots()]
+    assert os.path.realpath(get_app_root()) in roots
+
+def test_tool_path_roots_skips_app_root_when_frozen(monkeypatch):
+    # In frozen (PyInstaller) builds the app root is _MEIPASS, a temp
+    # extraction dir the user does not own; skip it.
+    import sys as _sys
+    monkeypatch.setattr(_sys, 'frozen', True, raising=False)
+    from src.tool_execution import _tool_path_roots
+    roots = [os.path.realpath(r) for r in _tool_path_roots()]
+    # The real app root MUST NOT be a root when frozen - if it slipped in
+    # somehow the regression would be hard to spot in dev (always passes).
+    from src.runtime_paths import get_app_root
+    assert os.path.realpath(get_app_root()) not in roots
+
+def test_resolve_tool_path_allows_home_file(tmp_path, monkeypatch):
+    # Regression: a normal file under HOME now resolves cleanly. Used to
+    # fail with 'outside the allowed roots' unless HOME was added via the
+    # tool_path_extra_roots setting.
+    import src.tool_execution as te
+    # Force no active workspace so _resolve_tool_path (not the in-workspace
+    # variant) is exercised.
+    monkeypatch.setattr(te, '_active_workspace',
+                        type('_Ctx', (), {'get': staticmethod(lambda *_: None)})())
+    home = os.path.realpath(os.path.expanduser('~'))
+    # Pick a real subdirectory under HOME that is allowed to host a file
+    # (e.g. ~/Documents or just /tmp on Windows where HOME is on a different
+    # drive). On POSIX HOME is always a directory we can write to.
+    candidate = os.path.join(home, '.devspace-tmp-test-' + os.urandom(4).hex())
+    if not _can_write_under(candidate):
+        pytest.skip(f'cannot create a test file under HOME on this platform: {home}')
+    try:
+        with open(candidate, 'w', encoding='utf-8') as f:
+            f.write('ok')
+        resolved = te._resolve_tool_path(candidate)
+        assert resolved == os.path.realpath(candidate)
+    finally:
+        try:
+            os.unlink(candidate)
+        except OSError:
+            pass
+
+def _can_write_under(path: str) -> bool:
+    parent = os.path.dirname(path) or '.'
+    try:
+        os.makedirs(parent, exist_ok=True)
+        # Probe with a quick file create.
+        with open(path + '.probe', 'w') as f:
+            f.write('x')
+        os.unlink(path + '.probe')
+        return True
+    except OSError:
+        return False
+
+def test_resolve_tool_path_still_blocks_ssh_under_home():
+    # Even with HOME on the default list, ~/.ssh/authorized_keys must STILL
+    # be rejected by the sensitive-subpath deny list. (Guard against an
+    # over-eager 'just allow everything under HOME' patch.)
+    import src.tool_execution as te
+    with pytest.raises(ValueError, match='sensitive directory'):
+        te._resolve_tool_path('~/.ssh/authorized_keys')
+    with pytest.raises(ValueError, match='sensitive directory'):
+        te._resolve_tool_path('~/.bashrc')
+    with pytest.raises(ValueError, match='sensitive directory'):
+        te._resolve_tool_path('~/.netrc')

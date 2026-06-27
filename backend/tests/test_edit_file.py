@@ -182,3 +182,80 @@ async def test_edit_file_non_unique(monkeypatch, tmp_path):
 async def test_edit_file_outside_allowed_roots():
     res = await EditFileTool().execute(json.dumps({"path": "/etc/hosts", "old_string": "x", "new_string": "y"}), {})
     assert res["exit_code"] == 1 and ("outside the allowed roots" in res["error"] or "sensitive" in res["error"])
+
+
+# --- 2026-06 regression: agent mode defaults to auto-approve ---
+#
+# Bug: any non-string / corrupted value for agent_edit_review used to flip
+# the user into the strict stage-then-approve flow (because None coerced
+# through '.strip()' raised and the except branch returned 'auto', but a
+# True/False/1/'yes' value would not match either side of the comparison
+# reliably across Python versions). Now any value that isn't the literal
+# string 'strict' collapses to 'auto' - so a fresh install, a corrupted
+# settings.json, or an upgraded user always lands on the silent-apply
+# flow that the agent-mode UX promises.
+
+def test_edit_review_mode_collapses_non_string_to_auto(monkeypatch):
+    # None, True, False, ints, lists - all should resolve to 'auto'.
+    from src.agent_tools.filesystem_tools import _edit_review_mode
+    import src.settings as s
+    monkeypatch.setattr(s, 'SETTINGS_FILE', '/nonexistent/test-no-settings.json')
+    monkeypatch.setattr(s, '_settings_cache', None)
+    for bad in (None, True, False, 0, 1, ['strict'], {'value': 'strict'}):
+        monkeypatch.setattr(s, 'get_setting', lambda key, _b=bad: _b)
+        assert _edit_review_mode() == 'auto', f'expected auto for {bad!r}'
+
+def test_edit_review_mode_collapses_get_setting_error_to_auto(monkeypatch):
+    # If reading settings blows up (corrupted file, missing module, etc.)
+    # we must still default to auto, never strict.
+    from src.agent_tools.filesystem_tools import _edit_review_mode
+    import src.settings as s
+    def _boom(*_a, **_kw):
+        raise RuntimeError('settings unavailable')
+    monkeypatch.setattr(s, 'get_setting', _boom)
+    assert _edit_review_mode() == 'auto'
+
+def test_edit_review_mode_strict_only_on_exact_string(monkeypatch):
+    # Only the literal string 'strict' (case + whitespace insensitive)
+    # turns strict on. Anything else is auto.
+    from src.agent_tools.filesystem_tools import _edit_review_mode
+    import src.settings as s
+    monkeypatch.setattr(s, 'SETTINGS_FILE', '/nonexistent/test-no-settings.json')
+    monkeypatch.setattr(s, '_settings_cache', None)
+    for value, expected in [
+        ('strict', 'strict'),
+        ('STRICT', 'strict'),
+        ('  Strict  ', 'strict'),
+        ('auto', 'auto'),
+        ('AUTO', 'auto'),
+        ('  auto ', 'auto'),
+        ('yes', 'auto'),
+        ('enabled', 'auto'),
+        ('', 'auto'),
+        ('strictly speaking', 'auto'),
+    ]:
+        monkeypatch.setattr(s, 'get_setting', lambda key, _v=value: _v)
+        got = _edit_review_mode()
+        assert got == expected, f'value={value!r} expected={expected!r} got={got!r}'
+
+def test_is_strict_review_mode_defensive(monkeypatch):
+    # Mirror of the filesystem_tools check on the agent_loop side, since
+    # agent_loop._is_strict_review_mode drives the SSE edit_pending event
+    # (the only client-visible 'approval needed' indicator). Any setting
+    # that isn't the literal 'strict' must collapse to False.
+    #
+    # Note: agent_loop.py does `from src.settings import get_setting` at
+    # module load, which binds the name in agent_loop's namespace; patching
+    # src.settings.get_setting alone would not affect the call site, so we
+    # patch the bound name on the agent_loop module directly.
+    import src.agent_loop as al
+    import src.settings as s
+    monkeypatch.setattr(s, 'SETTINGS_FILE', '/nonexistent/test-no-settings.json')
+    monkeypatch.setattr(s, '_settings_cache', None)
+    for bad in (None, True, False, 1, 0, ['strict'], {'value': 'strict'}, 'auto', 'AUTO', '', 'yes'):
+        monkeypatch.setattr(al, 'get_setting', lambda key, _b=bad: _b)
+        assert al._is_strict_review_mode() is False, f'expected False for {bad!r}'
+    monkeypatch.setattr(al, 'get_setting', lambda key: 'strict')
+    assert al._is_strict_review_mode() is True
+    monkeypatch.setattr(al, 'get_setting', lambda key: '  STRICT  ')
+    assert al._is_strict_review_mode() is True

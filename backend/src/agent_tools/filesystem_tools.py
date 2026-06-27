@@ -47,12 +47,27 @@ def _unified_diff(old: str, new: str, path: str) -> Optional[Dict[str, Any]]:
 
 
 def _edit_review_mode() -> str:
-    """'strict' (stage-then-approve) or 'auto' (apply-then-review, default)."""
+    """'strict' (stage-then-approve) or 'auto' (apply-then-review, default).
+
+    The default is "auto" so agent-mode edits land on disk immediately
+    without per-step approval prompts - that's what "auto-approve by
+    default in agent mode" means in practice. "strict" is opt-in via
+    Settings.
+
+    Defensive against corrupted / wrong-typed settings: any value that
+    isn't the literal string "strict" — after strip + lower — counts
+    as "auto". This means None, True, 1, "yes", "auto ", "AUTO" and
+    get_setting() raising all collapse to "auto" instead of flipping the
+    user into the stricter staged-edit flow by accident.
+    """
     try:
         from src.settings import get_setting
-        return "strict" if (get_setting("agent_edit_review") or "auto").strip().lower() == "strict" else "auto"
+        raw = get_setting("agent_edit_review")
     except Exception:
         return "auto"
+    if not isinstance(raw, str):
+        return "auto"
+    return "strict" if raw.strip().lower() == "strict" else "auto"
 
 
 def _write_text(path: str, text: str, make_dirs: bool = False) -> int:

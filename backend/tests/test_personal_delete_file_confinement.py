@@ -1,8 +1,24 @@
 import asyncio
 import os
+import sys
 from pathlib import Path
 
+import pytest
+
 from routes import personal_routes
+
+
+def _symlink_or_skip(src, dst):
+    """Create a symlink at *dst* pointing to *src*; skip the test when the
+    platform denies the privilege (``WinError 1314`` on Windows without
+    Developer Mode / admin). The principle the test is checking (realpath
+    catches symlink escape) still applies — the unit assertion is in
+    ``test_realpath_catches_symlink_escape``.
+    """
+    try:
+        os.symlink(src, dst)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink not permitted on this platform: {exc}")
 
 
 class _FakePersonalDocs:
@@ -37,7 +53,7 @@ def test_delete_file_refuses_symlink_directory_escape(tmp_path, monkeypatch):
     outside.mkdir()
     victim = outside / "victim.txt"
     victim.write_text("keep me", encoding="utf-8")
-    os.symlink(outside, uploads / "linked")
+    _symlink_or_skip(outside, uploads / "linked")
 
     docs = _FakePersonalDocs()
     rag = _FakeRAG()

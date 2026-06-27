@@ -99,6 +99,9 @@ async def test_webhook_delivery_uses_naive_utc_timestamps(monkeypatch):
     class _Client:
         def __init__(self):
             self.content = ""
+            # Mirror httpx.AsyncClient's surface used by WebhookManager.client
+            # (the lazy property checks `_client.is_closed` before returning).
+            self.is_closed = False
 
         async def post(self, _url, content, headers):
             self.content = content
@@ -110,7 +113,10 @@ async def test_webhook_delivery_uses_naive_utc_timestamps(monkeypatch):
     monkeypatch.setattr(wm, "SessionLocal", lambda: db)
 
     manager = wm.WebhookManager()
-    await manager._client.aclose()
+    # Force the lazy client to materialise before we swap in the mock, so
+    # `_deliver`'s `self.client` access doesn't recreate a real httpx client.
+    _real = manager.client
+    await _real.aclose()
     manager._client = client
 
     await manager._deliver("hook-1", "http://93.184.216.34/", None, "webhook.test", {"ok": True})

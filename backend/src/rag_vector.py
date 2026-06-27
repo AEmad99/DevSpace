@@ -560,6 +560,17 @@ class VectorRAG:
         if not self.healthy:
             return {"success": False, "message": "Collection not initialized"}
         directory = os.path.abspath(directory)
+        # Normalize through pathlib so the boundary match is separator-agnostic.
+        # On Windows os.sep == '\\' but the stored `source` from indexing is
+        # often POSIX-style ('/a/docs/f1.md'), so a literal "directory + os.sep"
+        # comparison misses every chunk. Using Path.parts + a normalised prefix
+        # string (always '/'-joined) makes the match correct on both platforms
+        # while keeping the boundary tight (so '/a/docs2' does NOT match a
+        # removal request for '/a/docs').
+        try:
+            dir_prefix = "/" + "/".join(Path(directory).parts).lstrip("/\\")
+        except Exception:
+            dir_prefix = directory
         try:
             removed_ids = set()
             for _lane_name, collection in self._collections_for_delete():
@@ -569,7 +580,7 @@ class VectorRAG:
                     for i, m in enumerate(results["metadatas"])
                     if isinstance(m, dict)
                     and isinstance(m.get("source"), str)
-                    and (m["source"] == directory or m["source"].startswith(directory + os.sep))
+                    and self._source_is_under(m["source"], directory, dir_prefix)
                 ]
                 if ids:
                     collection.delete(ids=ids)
@@ -583,6 +594,28 @@ class VectorRAG:
         except Exception as e:
             logger.error(f"remove_directory {directory}: {e}")
             return {"success": False, "message": str(e)}
+
+    @staticmethod
+    def _source_is_under(source: str, directory: str, dir_prefix: str) -> bool:
+        """True iff `source` equals `directory` or is a strict descendant.
+
+        Handles mixed POSIX/Windows separators so a stored ``source`` like
+        ``/a/docs/f1.md`` still matches a removal request for
+        ``C:\\a\\docs`` on Windows (and vice versa). The match is anchored
+        on directory boundaries so sibling prefixes (``/a/docs2``,
+        ``/a/docs_personal``) are NOT removed by accident.
+        """
+        # Exact match first (covers the directory-itself case).
+        if source == directory:
+            return True
+        # Normalise both sides via pathlib: resolve to absolute, then strip
+        # the drive/UNC prefix on Windows so the comparison is a clean
+        # forward-slash path. normpath collapses '..' and trailing slashes.
+        try:
+            src_norm = "/" + "/".join(Path(os.path.abspath(source)).parts).lstrip("/\\")
+        except Exception:
+            src_norm = source.replace("\\", "/")
+        return src_norm == dir_prefix or src_norm.startswith(dir_prefix + "/")
 
     def reindex_directory(
         self, directory: str, file_extensions: Optional[set] = None
