@@ -121,7 +121,7 @@ def _clear_orphaned_session_endpoint(sess, owner: str | None = None) -> bool:
         if db_session:
             db_session.endpoint_url = ""
             db_session.model = ""
-            db_session.updated_at = datetime.utcnow()
+            db_session.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
             db.commit()
         sess.endpoint_url = ""
         sess.model = ""
@@ -292,7 +292,7 @@ def _recover_empty_session_model(sess, session_id: str, owner: str | None = None
         db_session = db_session_q.first()
         if db_session:
             db_session.model = model
-            db_session.updated_at = datetime.utcnow()
+            db_session.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
             db.commit()
         sess.model = model
         logger.info(

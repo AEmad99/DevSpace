@@ -43,7 +43,10 @@ def _stream_timeout(read_timeout) -> httpx.Timeout:
     return httpx.Timeout(connect=LLMConfig.CONNECT_TIMEOUT, read=float(read_timeout), write=30.0, pool=5.0)
 
 
-# Cache for LLM responses
+# Cache for LLM responses — bounded by TTL + LRU to prevent unbounded memory growth.
+_MAX_CACHE_ENTRIES = 500
+_CACHE_TTL_SECONDS = 300
+
 def _get_cache_key(url: str, model: str, messages: List[Dict], 
                    temperature: float, max_tokens: int) -> str:
     """Generate cache key for LLM requests."""
@@ -61,7 +64,28 @@ def _get_cache_key(url: str, model: str, messages: List[Dict],
     }, sort_keys=True)
     return hashlib.sha256(content.encode()).hexdigest()
 
-_response_cache = {}
+_response_cache: Dict[str, Tuple[float, Any]] = {}
+_response_cache_lock = threading.Lock()
+
+def _get_cached_response(key: str) -> Any:
+    """Return cached response if it exists and is not expired, else None."""
+    with _response_cache_lock:
+        entry = _response_cache.get(key)
+        if not entry:
+            return None
+        if entry[0] < time.time():
+            del _response_cache[key]
+            return None
+        return entry[1]
+
+def _set_cached_response(key: str, value: Any) -> None:
+    """Store a response with TTL, evicting oldest entries if over limit."""
+    with _response_cache_lock:
+        if len(_response_cache) >= _MAX_CACHE_ENTRIES:
+            # Evict oldest by insertion time (simple FIFO)
+            oldest = next(iter(_response_cache))
+            del _response_cache[oldest]
+        _response_cache[key] = (time.time() + _CACHE_TTL_SECONDS, value)
 
 # Dead-host cooldown: maps host (scheme://host:port) -> unix ts when cooldown expires.
 # When a connect to a host fails, we mark it dead for DEAD_HOST_COOLDOWN seconds so
@@ -85,6 +109,31 @@ _host_fails: Dict[str, int] = {}
 # loses failure counts under concurrent connect errors (issue #659).
 _host_health_lock = threading.Lock()
 _model_activity: Dict[str, float] = {}
+
+# Prune dead-host entries older than cooldown to prevent unbounded growth.
+_DEAD_HOST_PRUNE_INTERVAL = 3600.0
+_last_dead_host_prune = 0.0
+
+
+def _prune_dead_hosts(now: float) -> None:
+    """Remove expired dead-host entries to prevent unbounded memory growth."""
+    global _last_dead_host_prune
+    if now - _last_dead_host_prune < _DEAD_HOST_PRUNE_INTERVAL:
+        return
+    with _host_health_lock:
+        expired = [h for h, ts in _dead_hosts.items() if ts < now]
+        for h in expired:
+            _dead_hosts.pop(h, None)
+            _host_fails.pop(h, None)
+        _last_dead_host_prune = now
+
+
+def _prune_model_activity(now: float) -> None:
+    """Remove model-activity entries older than 24 hours to prevent unbounded growth."""
+    cutoff = now - 86400.0
+    stale = [m for m, ts in _model_activity.items() if ts < cutoff]
+    for m in stale:
+        _model_activity.pop(m, None)
 
 _HARMONY_MARKER_RE = re.compile(
     r"<\|channel\|>(analysis|final)"
@@ -274,22 +323,7 @@ def close_http_client() -> None:
     except Exception:
         pass
 
-def _get_cached_response(cache_key: str) -> Optional[str]:
-    """Get cached response if it exists."""
-    return _response_cache.get(cache_key)
 
-def _set_cached_response(cache_key: str, response: str) -> None:
-    """Store response in cache."""
-    if len(_response_cache) > 128:
-        keys_to_remove = list(_response_cache.keys())[:64]
-        for key in keys_to_remove:
-            # pop(), not del: another thread (sync llm_call runs in FastAPI's
-            # threadpool) may have already evicted the same snapshotted key,
-            # and del would raise KeyError mid-eviction (issue #659).
-            _response_cache.pop(key, None)
-    _response_cache[cache_key] = response
-
-# ── Anthropic native API adapter ──
 
 ANTHROPIC_MODELS = [
     "claude-opus-4-20250514", "claude-opus-4",

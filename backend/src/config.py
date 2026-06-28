@@ -51,7 +51,7 @@ class LLMConfig(BaseSettings):
     
     # LLM endpoints
     default_host: str = Field(default="localhost", description="Default host for LLM services")
-    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key if using OpenAI")
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key if using OpenAI", env="OPENAI_API_KEY")
     openai_compat_path: str = Field(default="/v1/chat/completions", description="OpenAI compatible API path")
     
     # LLM behavior
@@ -191,6 +191,8 @@ def create_directories():
         directory.mkdir(parents=True, exist_ok=True)
 
 # Validate configuration on startup
+# NOTE: This is an explicit startup function. Call it from app lifespan,
+# NOT at import time, so tests can import config without side effects.
 def validate_config():
     """Validate the application configuration."""
     # Check if LLM host is reachable if specified
@@ -205,6 +207,3 @@ def validate_config():
     
     # Create directories
     create_directories()
-
-# Initialize configuration
-validate_config()

@@ -85,12 +85,14 @@ async def _cached(key: Tuple, ttl: float, fetch: Callable[[], Awaitable[Any]]) -
         async with _shared_cache_lock:
             _shared_cache[key] = (time.monotonic() + ttl, val)
             _shared_cache_pending.pop(key, None)
-        pending.set_result(val)
+        if not pending.done():
+            pending.set_result(val)
         return val
     except Exception as e:
         async with _shared_cache_lock:
             _shared_cache_pending.pop(key, None)
-        pending.set_exception(e)
+        if not pending.done():
+            pending.set_exception(e)
         raise
 
 

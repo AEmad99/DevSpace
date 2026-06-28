@@ -65,21 +65,27 @@ def encrypt(plaintext: str) -> str:
     return _PREFIX + token
 
 
-def decrypt(value: str) -> str:
+def decrypt(value: str, raise_on_error: bool = False) -> str:
     """Decrypt an `enc:`-prefixed value. Plaintext (legacy) passes
-    through unchanged. Returns "" on decryption failure so a corrupt
-    or rotated-key row degrades to "unconfigured" rather than 500."""
+    through unchanged. By default returns "" on decryption failure so a
+    corrupt or rotated-key row degrades to "unconfigured" rather than
+    500. Pass `raise_on_error=True` to surface the exception for key
+    rotation or migration diagnostics."""
     if not value:
         return value or ""
     if not value.startswith(_PREFIX):
         return value
     try:
         return _get_fernet().decrypt(value[len(_PREFIX):].encode("ascii")).decode("utf-8")
-    except InvalidToken:
+    except InvalidToken as exc:
         logger.error("Failed to decrypt stored secret — wrong key or corrupt token")
+        if raise_on_error:
+            raise
         return ""
     except Exception as e:
         logger.error(f"Decrypt failure: {e}")
+        if raise_on_error:
+            raise
         return ""
 
 

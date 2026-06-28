@@ -948,6 +948,12 @@ app.router.lifespan_context = _lifespan
 async def _startup_event():
     global upload_cleanup_task
     logger.info("Application starting up...")
+
+    # Explicit config validation (was import-time side effect; moved here
+    # so tests can import config without creating directories).
+    from src.config import validate_config as _validate_config
+    _validate_config()
+
     webhook_manager.set_loop(asyncio.get_running_loop())
     # Wipe any leftover incognito sessions from previous process — they're
     # ephemeral by design and must not survive a restart.

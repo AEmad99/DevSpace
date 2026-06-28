@@ -162,10 +162,10 @@ def _get_or_reset_collection(chroma_client, name: str, metadata: Dict[str, Any],
         return chroma_client.get_or_create_collection(name=name, metadata=metadata)
 
     current = collection.metadata or {}
-    if not (
-        current.get("embedding_fingerprint") not in (None, metadata["embedding_fingerprint"])
-        or current.get("embedding_dimension") not in (None, metadata["embedding_dimension"])
-        or current.get("embedding_lane") not in (None, metadata["embedding_lane"])
+    if (
+        current.get("embedding_fingerprint") in (None, metadata["embedding_fingerprint"])
+        and current.get("embedding_dimension") in (None, metadata["embedding_dimension"])
+        and current.get("embedding_lane") in (None, metadata["embedding_lane"])
     ):
         return collection
 
