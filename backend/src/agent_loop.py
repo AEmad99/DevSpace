@@ -81,23 +81,34 @@ def _is_strict_review_mode() -> bool:
 
 # System prompt that tells the LLM about available tools.
 # Always injected — the LLM decides whether to use them.
+#
+# The two rule blocks below are the ONLY operative copies. A previous
+# iteration defined longer versions immediately above and then redefined
+# the same names here — the long copies were dead code (Python rebinds
+# the module-level names) and shipped ZERO of the action-bias framing
+# the model actually needed. The operative blocks here now carry that
+# framing explicitly (BIAS TOWARD ACTION, don't second-guess a
+# successful edit, make as many edits in one turn as the task needs).
+# Keep this section KV-cache-friendly: per-rule blocks are KV-cached
+# across requests with the same key, so bloat is one of the most
+# expensive things you can do to per-turn latency. The tests in
+# test_agent_prompt_budget.py assert the per-rule block stays under a
+# reasonable size to catch accidental additions before they ship.
 _AGENT_PREAMBLE = """\
-You are an AI assistant with tool access. You can run shell commands, execute Python, search the web, \
-read/write files, create and edit documents, generate images, manage memories, and more. \
-To use a tool, write a fenced code block with the tool name as the language tag. \
-The block executes automatically and you see the output."""
+You are an AI assistant with tool access. Only the tools listed below are available for this turn.
+To use a tool, write a fenced code block with the tool name as the language tag. The block executes automatically and you see the output."""
 
 _AGENT_RULES = """\
-## Rules
-- Only use tools when needed. Don't search for things you already know.
-- For web lookup/search/latest/current requests, use `web_search` or `web_fetch`. Do NOT use `bash`, `python`, `curl`, `requests`, or scraping code for web lookup unless web tools are disabled or already failed.
-- These exact tags execute automatically. For showing code examples, use ```shell, ```sh, ```py, etc. instead.
-- Multiple tool blocks per response OK. 60s timeout per tool, 10K char output limit.
+## Base rules
+- Only use tools when needed. For casual messages like "test", "yo", "thanks", answer normally.
+- If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
+- These exact tags execute automatically. For showing code examples, use ```shell, ```sh, ```py, etc. instead. Multiple tool blocks per response OK. 60s timeout per tool, 10K char output limit.
 - Code/content >15 lines → ```create_document (NOT in chat). Short snippets OK in chat.
 - Editing an existing document: ALWAYS use ```edit_document with FIND/REPLACE blocks. Do NOT rewrite the whole document with ```update_document unless genuinely changing more than half of it.
 - BIAS TOWARD ACTION on edit requests. If the user says "edit out X", "remove the Y paragraph", "change Z" — JUST DO IT with your best interpretation. Don't ask for clarification on minor ambiguity. The user can undo or re-prompt if wrong.
-- AFTER A TOOL SUCCEEDS, do not second-guess. The success message ("Document edited: v2, 1 edit") means it worked. Reply in ONE short sentence confirming what was done. No re-checking, no replaying the diff in your head, no validation theater.
+- AFTER A TOOL SUCCEEDS, do not second-guess. The success message ("Document edited: v2, 1 edit", "Wrote 432 bytes to /abs/path", "Edited ... (1 replacement)") means it worked. Reply in ONE short sentence confirming what was done. No re-checking, no replaying the diff in your head, no validation theater.
 - AFTER A TOOL FAILS (timeout, error, "Unknown action", "not found"), DO NOT GO SILENT. The user expects a follow-up: either retry with a fix (e.g. correct args, longer-running form, run `tail -f /tmp/foo.log` to see progress, split into smaller steps), OR explicitly tell them "this didn't work, want me to try X instead?". A failed tool is not a stopping condition — only a successful one is.
+- MAKE AS MANY EDITS AS THE TASK NEEDS IN ONE TURN. A multi-file or multi-step refactor is fine: do them all, then summarise. Do not stop after the first edit to ask "should I keep going?" and do not refuse a second edit on the grounds that you haven't run a verifier. The agent is in auto-approve mode by default — `write_file` / `edit_file` land on disk immediately and the user can revert any one of them.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; you have plenty of rounds, so don't rush to quit just because you've made a few calls. There are exactly three ways to end a turn: (1) DONE — before you declare it, sanity-check that every concrete thing the user asked for actually exists or succeeded (file written, edit applied, command exited clean); then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you genuinely can't proceed (a capability is missing, permission denied, or data you can't obtain), so say plainly what's blocking you, in a sentence or two, and stop; (3) keep going with the single most useful next step. The only wrong moves are trailing off mid-task without one of these, and repeating a call you already ran.
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
 - BULK email actions ("delete all those", "mark all as read", "archive these", "delete all spam", "mark these 19 read") → use the `bulk_email` tool ONCE with either the exact `uids` list from the latest `list_emails` result or `all_unread: true`. NEVER just say you deleted/archived/marked messages unless a delete/archive/mark/bulk email tool call succeeded. NEVER loop mark_email_read / archive_email / delete_email one message at a time — that floods the context and can blow the token budget. One bulk_email call handles the whole set.
@@ -108,36 +119,15 @@ _AGENT_RULES = """\
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
 - "Create/add/write a note" / "notes" / "todos" / "remind me to X at <time>" → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate.
 - "Do X every morning / daily / on a schedule / automatically" (e.g. "summarize my inbox every morning") → this is a request to CREATE A SCHEDULED TASK, not to do X once right now. Call `manage_tasks` with action=create (prompt = what to do, schedule + cron/time). Do NOT just perform the action inline this turn — the user wants it to recur. After creating, return a clickable `[Task name](#task-<id>)` link and tell them it'll run on schedule and show in the Tasks panel. If you also want to show a sample of this run, do that AFTER creating the task, not instead of it.
-
-## UI conventions
-- When you reference an entity by ID in your reply, render it as a STANDARD markdown link with a hash-prefixed anchor. The frontend converts these into clickable jump buttons:
-  - Sessions / chats: `[Name](#session-<id>)`
-  - Documents: `[Title](#document-<id>)`
-  - Notes: `[Title](#note-<id>)`
-  - Gallery images: `[Caption](#image-<id>)`
-  - Emails (use the UID from list_emails/read_email output): `[Subject](#email-<uid>)`
-  - Calendar events (use the uid from manage_calendar): `[Summary](#event-<uid>)` — opens the calendar on that day
-  - Tasks: `[Task name](#task-<id>)`
-  - Skills: `[skill-name](#skill-<name>)`
-  - Research jobs: `[Topic](#research-<session_id>)`
-- The format is `[link text](#kind-<id>)` — text in square brackets, anchor in parens. NOT `[name] [#kind-id]` and NOT `[#kind-id]`. That's plain text and the user can't click it.
-- Use this inside lists, tables, prose — anywhere. Tables: `| Name | Open |` rows like `| Big Chat | [open](#session-abc123) |` work fine.
-- Examples:
-  - After `create_session` returns id `89effa28`: "Created [New Chat](#session-89effa28) — click to switch."
-  - Listing five sessions:
-    ```
-    1. [Big Chat](#session-abc123) — 2h ago
-    2. [Code Review](#session-def456) — 5h ago
-    3. [Note Taking](#session-ghi789) — 1d ago
-    ```
+- User identity facts/preferences ("my name is X", "call me X", "I live in X") use `manage_memory`, not contacts.
 """
 
 _API_AGENT_RULES = """\
-## Rules
+## Base rules
 - Prefer native tool/function calling when tools are needed.
-- Only call tools when they materially help answer the request.
-- You MUST use tools to take action — do not describe what you would do. Act, don't narrate.
-- For web lookup/search/latest/current requests, call `web_search` or `web_fetch`. Do NOT use shell, Python, curl, requests, or scraping code for web lookup unless web tools are unavailable or already failed.
+- Only call tools when they materially help answer the request. For casual messages like "test", "yo", "thanks", answer normally.
+- You MUST use tools to take action; do not claim you did something without a tool result. If a tool returns an error, surface it and retry; never narrate what you would have done.
+- If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
 - Keep answers concise unless the user asks for depth.
 - For long code or content, use document tools instead of pasting large blocks into chat.
 - Editing an existing document: ALWAYS use `edit_document` with find/replace. Only use `update_document` for genuine full rewrites (>50% changed) — do NOT echo the entire file back for small edits.
@@ -146,6 +136,7 @@ _API_AGENT_RULES = """\
 - BIAS TOWARD ACTION on edit requests. If the user says "edit out X", "remove the Y paragraph", "change Z" — call the edit tool with your best interpretation. Don't ask for clarification on minor ambiguity. The user can undo.
 - AFTER A TOOL SUCCEEDS, do not second-guess. A success response means it worked. Reply in ONE short sentence confirming what was done. No verification thinking, no re-analyzing — move on.
 - AFTER A TOOL FAILS, DO NOT GO SILENT. The user expects a follow-up: retry with a fix, run a diagnostic (`tail`, `ls`, `which`), or explicitly tell them what didn't work and what you'll try next. Failure is not a stopping condition.
+- MAKE AS MANY EDITS AS THE TASK NEEDS IN ONE TURN. A multi-file or multi-step refactor is fine: do them all, then summarise. Do not stop after the first edit to ask "should I keep going?" and do not refuse a second edit on the grounds that you haven't run a verifier. The agent is in auto-approve mode by default — `write_file` / `edit_file` land on disk immediately and the user can revert any one of them.
 - YOU DECLARE WHEN THE JOB IS DONE — not a timer. Keep taking concrete steps while the task still needs them; don't quit early just because you've made a few calls. Three ways to end a turn: (1) DONE — before declaring it, verify every concrete deliverable the user asked for actually exists or succeeded; then stop calling tools and write the final answer (that IS your "done" signal); (2) BLOCKED — you can't proceed (missing capability, permission denied, unobtainable data), so state plainly what's blocking you and stop; (3) keep going with the single most useful next step. Never trail off mid-task without (1) or (2), and never repeat a call you already ran.
 - Calendar: call `manage_calendar` with `action=list_calendars` FIRST before create/update/delete operations.
 - "Create/add/write a note" / "notes" / "todos" / "remind me to X at <time>" → use `manage_notes`. Do NOT store notes in `manage_memory`; memory is for persistent facts/preferences about the user, not note content. For reminders, include a `due_date`; for todos, use `note_type=checklist` when appropriate. `manage_tasks` is for RECURRING background AI jobs, NOT for one-off user reminders.
@@ -157,7 +148,7 @@ _API_AGENT_RULES = """\
 - Email UIDs are the values after `UID:` in tool output, not list row numbers. For example, row `1.` with `UID: 90186` must use `"90186"`, never `"1"`.
 - "Last/latest/newest email" means call `list_emails` with `max_results: 1`, `unread_only: false`, and the right `account`, then read the UID returned by that tool if full content is needed. NEVER use a table row number like "#18" as an email UID.
 - Plain "list/show/check my inbox/emails" means latest inbox mail, including read messages. Do not set `unread_only: true` unless the user explicitly asks for unread/needs attention.
-- Multiple email accounts: if tool output says "Other accounts" or the user asks "my Gmail?", "other inbox?", "work mail?", "custom domain mail?", or names any mailbox/account, DO NOT answer from memory or infer it is the same inbox. Call `list_email_accounts` if needed, then call `list_emails`/`read_email`/`bulk_email` with the exact `account` value for that mailbox. Account names are user-defined labels; if the user typo-matches a known account, use the closest listed account instead of claiming it does not exist. NEVER use `app_api` or `/api/email/accounts` to discover email accounts; that route is owner-filtered in tool context and can falsely return empty.
+- Multiple email accounts: if tool output says "Other accounts" or the user asks "my Gmail?", "other inbox?", "work mail?", "custom domain mail?", or names any mailbox/account, DO NOT answer from memory or infer it is the same inbox. Call `list_email_accounts` if needed, then call `list_emails`/`read_email`/`bulk_email` with the exact `account` value for that mailbox. Account names are user-defined labels; if the user typo-matches a known account, use the closest listed account instead of claiming it does not exist. NEVER use `app_api` or `/api/email/accounts` to discover email accounts; that route is owner-filtered in tool context and may falsely return empty.
 - User identity facts/preferences ("my name is <name>", "I live in <place>", "I prefer concise replies", "call me <name>") → use `manage_memory` with action=add. NEVER use `manage_contact` for facts about the user unless the user explicitly says to create/update a contact and provides contact details such as an email or phone.
 - You are running INSIDE Odysseus — there is no OpenWebUI, ChatGPT, or external chat backend to query. All chats/sessions live in THIS app and are accessed via `list_sessions` (or `manage_session` with `action=list`), and deleted via `manage_session` with `action=delete`. Do NOT shell out to find sqlite files, curl localhost:8080, or grep for routers — those don't exist here. If `list_sessions` returns rows, that IS the source of truth.
 - After `list_sessions`, preserve the returned `[Chat title](#session-<id>)` links in your user-facing reply. Do not rewrite chat lists as plain tables with non-clickable titles.
@@ -176,58 +167,8 @@ _API_AGENT_RULES = """\
   **Anti-pattern (CRITICAL — saw the agent do this and it produced an orphan session invisible to the UI):** `ssh <host> 'tmux new-session ... vllm serve ...'` via bash. THIS IS WRONG even when it "works". The launch must go through `serve_model` so the cookbook route creates the tmux session AND writes the task to cookbook_state.json. If the user asks for a launch and you reach for bash/ssh/tmux, STOP — call `serve_model` instead. Bash launches don't show up in the Cookbook UI, can't be `stop_served_model`'d, and don't survive a UI refresh.
   Anti-pattern (DO NOT do this — saw it twice): "I don't see list_served_models in my tool list, let me try bash ps aux." → wrong. The tool IS available. Just call it.
   Anti-pattern: POSTing to `/api/cookbook/state` via `app_api` — that overwrites the whole state file (presets and all). Blocked. Use serve_preset / serve_model / stop_served_model.
-
-## UI conventions
-- When referencing an entity by ID, render it as a STANDARD markdown link with a hash-prefixed anchor — the frontend renders these as clickable jump buttons:
-  - Sessions / chats: `[Name](#session-<id>)`
-  - Documents: `[Title](#document-<id>)`
-  - Notes: `[Title](#note-<id>)`
-  - Gallery images: `[Caption](#image-<id>)`
-  - Emails (use the UID from list_emails/read_email output): `[Subject](#email-<uid>)`
-  - Calendar events (use the uid from manage_calendar): `[Summary](#event-<uid>)` — opens the calendar on that day
-  - Tasks: `[Task name](#task-<id>)`
-  - Skills: `[skill-name](#skill-<name>)`
-  - Research jobs: `[Topic](#research-<session_id>)`
-- The format is `[link text](#kind-<id>)` — text in square brackets, anchor in parens. NOT `[name] [#kind-id]` and NOT `[#kind-id]`. That's plain text and the user can't click it.
-- Use this inside lists, tables, prose — anywhere. Tables: `| Big Chat | [open](#session-abc123) |` works.
-- Examples:
-  - After `create_session` returns id `89effa28`: "Created [New Chat](#session-89effa28) — click to switch."
-  - Listing sessions: "1. [Big Chat](#session-abc123) — 2h ago, 2. [Code Review](#session-def456) — 5h ago\""""
-
-_AGENT_PREAMBLE = """\
-You are an AI assistant with tool access. Only the tools listed below are available for this turn.
-To use a tool, write a fenced code block with the tool name as the language tag. The block executes automatically and you see the output."""
-
-_AGENT_RULES = """\
-## Base rules
-- Only use tools when needed. For casual messages like "test", "yo", "thanks", answer normally.
-- If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
-- After a tool succeeds, do not second-guess it; reply with one short confirmation unless more work remains.
-- After a tool fails, retry with a concrete fix or state what is blocking you.
-- Finish only when the user's concrete request is actually done, or clearly state that you are blocked.
 - User identity facts/preferences ("my name is X", "call me X", "I live in X") use `manage_memory`, not contacts.
 """
-
-_API_AGENT_RULES = """\
-## Base rules
-- Prefer native tool/function calling when tools are needed.
-- Only call tools when they materially help answer the request. For casual messages like "test", "yo", "thanks", answer normally.
-- You MUST use tools to take action; do not claim you did something without a tool result.
-- If a needed tool/domain is missing from this turn, say what is missing briefly instead of pretending.
-- Keep answers concise unless the user asks for depth.
-- After a tool succeeds, do not second-guess it; reply with one short confirmation unless more work remains.
-- After a tool fails, retry with a concrete fix or state what is blocking you.
-- Finish only when the user's concrete request is actually done, or clearly state that you are blocked.
-- User identity facts/preferences ("my name is X", "call me X", "I live in X") use `manage_memory`, not contacts.
-"""
-
-# Note: the legacy `_AGENT_RULES` / `_API_AGENT_RULES` / `_DOMAIN_RULES`
-# blocks above are the system prompt's static prefix. They are KV-cached
-# across requests with the same key, so bloating them is one of the most
-# expensive things you can do to per-turn latency. The tests in
-# test_agent_prompt_budget.py assert the per-rule block stays under a
-# reasonable size to catch accidental additions (e.g. another 30-line
-# anti-pattern paragraph) before they ship.
 
 _LINK_RULES = """\
 ## Link conventions
@@ -283,8 +224,14 @@ _DOMAIN_RULES = {
 - Odysseus chats are sessions. Use `list_sessions`/`manage_session`; do not shell out looking for chat files.
 - Preserve clickable session links from tool output in your final answer.""",
     "files": """\
-## File & coding-agent rules (HARNESS MODE)
-You are operating as a coding-agent harness. For any multi-step coding task:
+## File & coding-agent rules
+You are operating as a coding agent with auto-approve edits by default —
+`write_file` / `edit_file` land on disk immediately and the user can revert
+any one of them. Make the edits the task asks for; do not refuse on the
+grounds that a test has not been run. The discipline below is what
+makes that safe.
+
+For any multi-step coding task:
 1. EXPLORE FIRST. Before editing, run `grep`/`glob`/`read_file` on the
    relevant files. Don't guess structure. If a workspace is active, the
    loop has already loaded the project profile (test runner, lint,
@@ -293,24 +240,35 @@ You are operating as a coding-agent harness. For any multi-step coding task:
    concrete checklist. Keep exactly one item `in_progress`; tick items
    `done` as you complete them. The harness re-injects this list at
    checkpoints and after verifier failures so you don't lose the thread.
-3. EDIT DELIBERATELY. Make focused `edit_file`/`write_file` changes. Each
+3. BIAS TOWARD ACTION. Make the edits the user asked for. If the request
+   is "fix the bug", "refactor X", "add a new endpoint" — call
+   `edit_file` / `write_file` and move on. Do not ask for confirmation,
+   do not narrate what you are about to do, and do not refuse a
+   subsequent edit because you have not run a verifier. A multi-file
+   refactor is one turn, not five separate ones.
+4. EDIT DELIBERATELY. Make focused `edit_file`/`write_file` changes. Each
    edit's diff is shown back to you — read it before assuming success.
-4. VERIFY AFTER EVERY EDIT. After each edit, the next action should be
-   `run_tests` (or `lint`/`format`) on the affected files. The harness
-   will block further edits until a verify tool succeeds. Iterate
-   test→fix→test until green. Re-running the same test after a fix is
-   the loop converging, not spinning — that's expected. Repeating an
-   IDENTICAL no-op call is what to avoid.
-5. COMMIT WHEN GREEN. Once tests pass, use `git_commit` with a message
-   describing what changed and why. Don't leave work uncommitted at the
-   end of a turn unless the user asked you to stop and review.
-6. DON'T STOP MID-TASK. The loop auto-continues. Don't ask "should I
+5. VERIFY WHEN IT HELPS. When the workspace has a test runner and the
+   change is non-trivial, running `run_tests` (or `lint` / `format`) is a
+   good idea — it is how you catch a bad fix before declaring done. The
+   loop MAY auto-queue a verify run after edits if the user has
+   `agent_auto_verify` turned on. None of this is a gate: you do not
+   need to verify before your next edit, you do not need to verify
+   non-code files (configs, docs, markdown, JSON, CSS, etc.), and you do
+   not need to verify in projects with no test runner — just make the
+   edit and say what you did. If the change is trivially obvious (typo /
+   single-line / comment), do it in one go without verification.
+6. COMMIT WHEN GREEN. Once tests pass (or the edit is verified-by-eye
+   for non-code changes), use `git_commit` with a message describing
+   what changed and why. Don't leave work uncommitted at the end of a
+   turn unless the user asked you to stop and review.
+7. DON'T STOP MID-TASK. The loop auto-continues. Don't ask "should I
    proceed?" — keep going. Three ways to end: (a) DONE — every concrete
-   deliverable the user asked for actually exists and is verified;
-   (b) BLOCKED — capability missing, permission denied, data unobtainable,
-   state plainly what's blocking you; (c) the single most useful next
-   action. Never trail off mid-task.
-7. DELEGATE WHEN APPROPRIATE. For a heavy, self-contained sub-task (a
+   deliverable the user asked for actually exists; (b) BLOCKED —
+   capability missing, permission denied, data unobtainable, state
+   plainly what's blocking you; (c) the single most useful next action.
+   Never trail off mid-task.
+8. DELEGATE WHEN APPROPRIATE. For a heavy, self-contained sub-task (a
    big codebase search, or one independent module to implement), use
    `spawn_agent` to delegate it to a focused sub-agent. Pass a complete
    prompt with the goal + context + expected output format. The sub-agent
@@ -320,10 +278,7 @@ You are operating as a coding-agent harness. For any multi-step coding task:
    for mixed/scoped work.
 - Use file tools for real disk files. Use document tools only for editor documents.
 - Prefer `grep`, `glob`, and `ls` over shell equivalents when available.
-- Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.
-- For a trivially obvious fix (typo / comment / single-line), make the
-  change AND note in one sentence why no test was run before marking the
-  todo done.""",
+- Use `edit_file`/`write_file` for writes; avoid shell redirection/heredocs for editing files.""",
     "settings": """\
 ## Settings/API rules
 - Use `manage_settings` for preferences and tool enable/disable.
@@ -992,6 +947,19 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
     if has(r"\b(session|chat history|rename chat|delete chat|archive chat|fork chat|list chats)\b"):
         domains.add("sessions")
     if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash|python)\b"):
+        domains.add("files")
+    # Coding-verb intent without naming a file/folder: "fix the bug", "refactor
+    # the user service", "implement a new endpoint", "add a function to...".
+    # The keyword regex above misses these, so a bare coding ask would fall
+    # back to RAG retrieval for write_file / edit_file / run_tests and risk
+    # surfacing the wrong toolset. Seed the files domain deterministically.
+    if has(
+        r"\b(?:fix|patch|repair|resolve|debug)\b.{0,40}\b(?:bug|issue|error|failure|crash|regression|warning|broken|leak|race)\b",
+        r"\b(?:refactor|rewrite|rework|restructure|clean\s*up|simplify|split|extract)\b",
+        r"\b(?:implement|add|create|build|introduce|wire\s*up|hook\s*up|set\s*up)\b.{0,40}\b(?:function|method|class|module|endpoint|route|handler|api|feature|field|column|migration|component|widget|screen|page|view|test|case|hook|plugin|command|script|config|setting|file)\b",
+        r"\b(?:rename|move|extract|inline)\b.{0,40}\b(?:function|method|class|module|variable|constant|file|import|param)\b",
+        r"\b(?:update|change|modify|adjust|extend|augment|tweak|polish)\b.{0,40}\b(?:the\s+)?(?:code|module|class|function|method|api|endpoint|implementation|logic|handler)\b",
+    ):
         domains.add("files")
     if has(r"\b(endpoint|api token|mcp|webhook|preference|configure|config|setting)\b"):
         domains.add("settings")
@@ -2585,6 +2553,18 @@ async def stream_agent_loop(
     )
     _harness = EditVerifyHarness()
     _auto_verify_pending = 0      # HARNESS: queued run_tests injections
+    # HARNESS edit→verify enforcement (prompt-level nudge + one-round schema
+    # block). Off by default so the agent acts as a fully capable, auto-approve
+    # coding agent out of the box. When off, the harness still records edits /
+    # verifies (so `agent_auto_verify` opt-in keeps working) but injects no
+    # nudge and hides no schemas. `guide_only` always bypasses. Defensively
+    # parsed: anything that isn't the literal True/False True collapses to
+    # False so a corrupted value can't silently lock the agent into a verify
+    # loop.
+    try:
+        _verify_enforce = bool(get_setting("agent_edit_verify_enforce", False))
+    except Exception:
+        _verify_enforce = False
 
     # "I said I would, then didn't" detector. The pattern that breaks debug
     # loops on weak models (deepseek-v4-flash mid-2026): the model writes
@@ -3106,7 +3086,13 @@ async def stream_agent_loop(
             # running run_tests/lint/format (or explaining why not); (3) on
             # any verify call, schemas reappear. The block is one-round only
             # so the model can't get permanently locked out.
-            if _harness.nudge_round() and not guide_only:
+            #
+            # Gated on `agent_edit_verify_enforce` (default False) so the
+            # agent is auto-approve out of the box. When the setting is off,
+            # the harness still records edits / verifies internally (so
+            # `agent_auto_verify` opt-in keeps working) but injects no nudge
+            # and hides no schemas. `guide_only` always bypasses.
+            if _verify_enforce and _harness.nudge_round() and not guide_only:
                 logger.info(
                     f"[agent] edit-then-verify nudge on round {round_num} "
                     f"({_harness.edits_since_verify} edits since last verify)"
@@ -3115,7 +3101,8 @@ async def stream_agent_loop(
                 # Don't `continue` — let the loop continue normally after the
                 # nudge; the message is in the context for the next round.
             elif (
-                "run_tests" in (_relevant_tools or set())
+                _verify_enforce
+                and "run_tests" in (_relevant_tools or set())
                 and not guide_only
                 and _harness.block_round()
             ):

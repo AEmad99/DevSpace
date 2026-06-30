@@ -26,7 +26,13 @@ from src.agent_loop import (
 # Soft caps (chars). Pick a number that's well above the current value
 # but small enough to catch a careless 30-line paragraph.
 PREAMBLE_MAX = 600
-RULES_MAX = 6000              # _AGENT_RULES + _API_AGENT_RULES are similar
+# _AGENT_RULES + _API_AGENT_RULES were bumped from ~6 KB to ~13 KB to ship
+# the action-bias framing the auto-approve agent design depends on
+# (BIAS TOWARD ACTION, don't second-guess a successful edit, make as many
+# edits as the task needs in one turn). The growth was conscious and is
+# pinned by test_agent_prompt_action_bias.py. The cap is set ~15% above
+# the current size so a future accidental ~2 KB addition is still caught.
+RULES_MAX = 15_000
 LINK_RULES_MAX = 1500
 DOMAIN_RULES_TOTAL_MAX = 15_000  # sum of all per-domain rules
 TOOL_SECTIONS_TOTAL_MAX = 60_000  # sum of all per-tool sections

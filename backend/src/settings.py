@@ -146,6 +146,15 @@ DEFAULT_SETTINGS = {
     # in `<workspace>/.devspace/auto-verify.json` ({"enabled": true}); the
     # override takes precedence over this global setting.
     "agent_auto_verify": False,
+    # HARNESS edit→verify enforcement (the "nudge" / one-round block on
+    # edit_file / write_file when the model edits without verifying). Off by
+    # default so the agent acts as a fully capable, auto-approve coding agent
+    # out of the box: the model makes as many edits in a turn as the task
+    # needs, with no self-enforced verify gate. Turn ON to opt back into the
+    # soft-nudge + one-round-block discipline. Independent of
+    # `agent_auto_verify` (which auto-runs tests); this only gates the
+    # prompt-level nudge and the schema filter. `guide_only` always bypasses.
+    "agent_edit_verify_enforce": False,
     # Sub-agents: let the agent spawn a nested focused agent (its own context +
     # constrained toolset) for a self-contained sub-task via the `spawn_agent`
     # tool, getting back just a summary. Keeps heavy exploration / independent
