@@ -641,15 +641,17 @@ export function initThemeUI() {
 
   // Render preset swatches
   grid.innerHTML = Object.entries(THEMES).map(([name, c]) => `
-    <div class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}">
-      <div class="theme-swatch-colors">
+    <button type="button" class="theme-swatch${name === activeName ? ' active' : ''}" data-theme="${name}"
+      aria-label="Use ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name)} theme"
+      aria-pressed="${name === activeName ? 'true' : 'false'}">
+      <span class="theme-swatch-colors" aria-hidden="true">
         <span style="background:${c.bg}"></span>
         <span style="background:${c.panel}"></span>
         <span style="background:${c.fg}"></span>
         <span style="background:${c.red}"></span>
-      </div>
+      </span>
       ${name === 'dark' ? 'original' : (name === 'gpt' ? 'GPT' : name)}
-    </div>
+    </button>
   `).join('');
 
   // Render custom theme swatches into separate card
@@ -701,7 +703,12 @@ export function initThemeUI() {
 
   // Click handlers for all swatches (preset + custom) across both grids
   const allGrids = [grid, userGrid].filter(Boolean);
-  function clearAllActive() { allGrids.forEach(g => g.querySelectorAll('.theme-swatch').forEach(s => s.classList.remove('active'))); }
+  function clearAllActive() {
+    allGrids.forEach(g => g.querySelectorAll('.theme-swatch').forEach(s => {
+      s.classList.remove('active');
+      s.setAttribute('aria-pressed', 'false');
+    }));
+  }
   allGrids.forEach(g => {
     g.querySelectorAll('.theme-swatch').forEach(sw => {
       sw.addEventListener('click', (e) => {
@@ -712,6 +719,7 @@ export function initThemeUI() {
         applyColors(colors);
         clearAllActive();
         sw.classList.add('active');
+        sw.setAttribute('aria-pressed', 'true');
         syncPickers(colors);
         const ct = sw.dataset.custom ? customThemes[name] : null;
         const f = ct && ct.font ? ct.font : DEFAULT_FONT;

@@ -3955,14 +3955,8 @@ function startDevSpaceApp() {
   }
 
   // Non-critical: load in parallel, resolve silently
-  modelsModule.refreshModels(true).then(() => {
-    const modelsBox = document.getElementById('models');
-    const hasModels = modelsBox && modelsBox.querySelector('.models-row');
-    if (!hasModels) {
-      const tip = document.getElementById('welcome-tip');
-      if (tip) tip.textContent = 'Add an AI endpoint from Settings in the sidebar, or paste an endpoint/API key into the chat.';
-    }
-  }).catch(() => {});
+  // refreshModels also owns the configured/unconfigured welcome state.
+  modelsModule.refreshModels(true).catch(() => {});
   modelsModule.refreshProviders();
   ragModule.loadPersonalDocs();
   memoryModule.loadMemories(); // Ensure memories are loaded on page load

@@ -1839,13 +1839,14 @@ body.bg-pattern-sparkles {
     /* Welcome screen — centered in available space above input bar */
     #welcome-screen {
       position:absolute;
-      top:40%;
+      top:35%;
       left:50%;
       transform:translate(-50%,-50%);
       display:flex;
       flex-direction:column;
       align-items:center;
       text-align:center;
+      width:min(560px, calc(100% - 32px));
       pointer-events:none;
       animation: welcome-enter 0.4s ease-out both;
       transition: top 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease, transform 0.3s ease;
@@ -1871,12 +1872,15 @@ body.bg-pattern-sparkles {
       #welcome-screen .welcome-tip { opacity: 0; max-height: 0; margin: 0; }
       #welcome-screen .welcome-version { margin-top: 6px; }
       .incognito-btn { margin-top: 8px; }
+      .chat-container.welcome-active .chat-input-bar { margin-bottom: 5vh; }
     }
     @media (max-height: 500px) {
       #welcome-screen { top: 22%; }
       #welcome-screen .welcome-name { font-size: 1.4rem; margin-bottom: 0; }
       #welcome-screen .welcome-sub { opacity: 0; max-height: 0; margin: 0; }
+      .welcome-launchers { display: none; }
       .incognito-btn { margin-top: 4px !important; }
+      .chat-container.welcome-active .chat-input-bar { margin-bottom: 0; }
     }
     @media (max-height: 380px) {
       #welcome-screen { opacity: 0; pointer-events: none; }
@@ -1894,14 +1898,14 @@ body.bg-pattern-sparkles {
       #welcome-screen .incognito-btn { margin-top: 6px; }
     }
     #welcome-screen .welcome-name {
-      font-size:2.2rem;
+      font-size:2.45rem;
       font-weight:700;
       background: linear-gradient(135deg, var(--brand-color, var(--red)), color-mix(in srgb, var(--brand-color, var(--red)) 60%, var(--fg)));
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
       letter-spacing:0.03em;
-      margin-bottom:10px;
+      margin-bottom:8px;
     }
     .welcome-boat {
       width: 1.8rem;
@@ -1911,11 +1915,11 @@ body.bg-pattern-sparkles {
       color: var(--brand-color, var(--red));
     }
     #welcome-screen .welcome-sub {
-      font-size:0.85rem;
-      color:color-mix(in srgb, var(--fg) 60%, transparent);
-      opacity:0.6;
-      line-height:1.5;
-      max-width:300px;
+      font-size:max(0.92rem, 12px);
+      color:color-mix(in srgb, var(--fg) 82%, transparent);
+      opacity:1;
+      line-height:1.55;
+      max-width:500px;
     }
     #welcome-screen .welcome-version {
       font-size:0.7rem;
@@ -1925,12 +1929,122 @@ body.bg-pattern-sparkles {
       user-select:none;
     }
     #welcome-screen .welcome-tip {
-      font-size:0.75rem;
+      font-size:max(0.82rem, 12px);
+      color:color-mix(in srgb, var(--fg) 60%, transparent);
+      opacity:1;
+      margin-top:12px;
+      max-width:480px;
+      line-height:1.45;
+    }
+    .welcome-eyebrow {
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      margin-bottom:8px;
+      color:color-mix(in srgb, var(--fg) 68%, transparent);
+      font-size:max(0.7rem, 10px);
+      font-weight:600;
+      letter-spacing:0.12em;
+      text-transform:uppercase;
+    }
+    .welcome-status-dot {
+      width:6px;
+      height:6px;
+      border-radius:50%;
+      background:var(--accent, var(--red));
+      box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, var(--red)) 14%, transparent);
+    }
+    .welcome-actions {
+      display:flex;
+      justify-content:center;
+      gap:8px;
+      margin-top:15px;
+      pointer-events:auto;
+    }
+    .welcome-primary,
+    .welcome-secondary,
+    .welcome-launch {
+      font:inherit;
+      cursor:pointer;
+      transition:transform 0.15s ease, border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }
+    .welcome-primary,
+    .welcome-secondary {
+      min-height:34px;
+      padding:7px 14px;
+      border:1px solid var(--border);
+      border-radius:9px;
+      font-size:max(0.78rem, 12px);
+      font-weight:600;
+    }
+    .welcome-primary {
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
       color:var(--fg);
-      opacity:0.2;
-      margin-top:24px;
-      max-width:320px;
-      line-height:1.4;
+      border-color:var(--accent, var(--red));
+      background:color-mix(in srgb, var(--accent, var(--red)) 24%, var(--panel));
+      box-shadow:0 8px 24px color-mix(in srgb, var(--accent, var(--red)) 18%, transparent);
+    }
+    .welcome-primary svg {
+      width:14px;
+      height:14px;
+      fill:none;
+      stroke:currentColor;
+      stroke-width:2;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+    }
+    .welcome-secondary {
+      color:var(--fg);
+      background:color-mix(in srgb, var(--panel) 70%, transparent);
+    }
+    .welcome-primary:hover,
+    .welcome-secondary:hover,
+    .welcome-launch:hover {
+      transform:translateY(-1px);
+    }
+    .welcome-primary:hover {
+      background:color-mix(in srgb, var(--accent, var(--red)) 34%, var(--panel));
+    }
+    .welcome-secondary:hover,
+    .welcome-launch:hover {
+      border-color:var(--accent, var(--red));
+      background:color-mix(in srgb, var(--accent, var(--red)) 10%, var(--panel));
+    }
+    .welcome-primary:focus-visible,
+    .welcome-secondary:focus-visible,
+    .welcome-launch:focus-visible {
+      outline:2px solid var(--accent, var(--red));
+      outline-offset:3px;
+    }
+    .welcome-launchers {
+      display:flex;
+      justify-content:center;
+      gap:7px;
+      margin-top:10px;
+      pointer-events:auto;
+    }
+    .welcome-launch {
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      min-height:30px;
+      padding:5px 10px;
+      color:color-mix(in srgb, var(--fg) 76%, transparent);
+      background:color-mix(in srgb, var(--panel) 54%, transparent);
+      border:1px solid color-mix(in srgb, var(--border) 72%, transparent);
+      border-radius:8px;
+      font-size:max(0.72rem, 11px);
+    }
+    .welcome-launch svg {
+      width:13px;
+      height:13px;
+      fill:none;
+      stroke:currentColor;
+      stroke-width:1.8;
+      stroke-linecap:round;
+      stroke-linejoin:round;
     }
     /* Incognito toggle — on welcome screen */
     .incognito-btn {
@@ -1938,7 +2052,7 @@ body.bg-pattern-sparkles {
       background: none;
       border: 1px solid var(--border);
       color: var(--fg);
-      opacity: 0.25;
+      opacity: 0.55;
       cursor: pointer;
       padding: 6px 12px;
       border-radius: 20px;
@@ -1947,7 +2061,7 @@ body.bg-pattern-sparkles {
       justify-content: center;
       gap: 6px;
       transition: all 0.15s;
-      margin-top: 16px;
+      margin-top: 10px;
       font-family: inherit;
       font-size: 11px;
     }
@@ -1981,7 +2095,10 @@ body.bg-pattern-sparkles {
     }
     @media (max-width:768px) {
       #welcome-screen .welcome-name { font-size:1.8rem; }
-      #welcome-screen .welcome-sub { font-size:0.8rem; }
+      #welcome-screen .welcome-sub { font-size:0.8rem; max-width:330px; }
+      .welcome-eyebrow { font-size:0.62rem; }
+      .welcome-launchers { gap:5px; }
+      .welcome-launch { padding:5px 8px; }
       .chat-container.welcome-active .chat-input-bar {
         margin-bottom:0;
         margin-left:0;
@@ -6743,10 +6860,12 @@ pre { background: var(--code-bg, var(--hl-bg, #282c34)) !important; }
     }
     .theme-swatch {
       border: 2px solid var(--border); border-radius: 8px; cursor: pointer;
-      padding: 5px; text-align: center; font-size: 0.65rem; color: var(--fg);
+      padding: 5px; text-align: center; font: inherit; font-size: 0.65rem; color: var(--fg);
+      background: transparent;
       transition: border-color 0.15s, transform 0.15s;
     }
     .theme-swatch:hover { transform: scale(1.06); }
+    .theme-swatch:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
     .theme-swatch.active { border-color: var(--red); box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 33%, transparent); }
     .theme-swatch-colors {
       display: flex; justify-content: center; margin-bottom: 3px;

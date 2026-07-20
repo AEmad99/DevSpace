@@ -65,13 +65,21 @@ Path overrides (point at a different backend/interpreter):
 
 ## Build the installer
 
+Self-contained Windows NSIS installer (bundled CPython + backend deps):
+
 ```
-tauri build
+npm run installer
+# or, if resources/python is already current:
+npm run installer:skip-deps
 ```
 
-Produces a Windows installer under `src-tauri/target/release/bundle/` (NSIS `.exe`
-and/or MSI). The current build targets this machine's local backend + venv paths;
-fully portable bundling of the Python runtime is future work.
+Produces `src-tauri/target/release/bundle/nsis/DevSpace_<version>_x64-setup.exe`.
+See `scripts/build_installer.ps1` and `AGENTS.md` for the full pipeline.
+
+## Agent / contributor orientation
+
+Coding agents should start with [`AGENTS.md`](AGENTS.md). Architecture deep-dive:
+[`docs/APPLICATION_OVERVIEW.md`](docs/APPLICATION_OVERVIEW.md).
 
 ## License
 
