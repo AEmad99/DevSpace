@@ -31,6 +31,7 @@ import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
 import { highlightToolOutput, _attachDiffApprovalButtons, buildAgentDiffHtml } from './toolOutputHooks.js';
+import { createLiveThinkingThrottle, stripLiveThinkingTags } from './liveThinkingThrottle.js';
 
 // Lazy loader for document.js — caches the in-flight promise so concurrent
 // callers share one fetch. Returns the module's default export. Resolves to
@@ -1242,6 +1243,9 @@ function _doc() {
       let _liveThinkSection = null;
       let _liveThinkContent = null;
       let _liveThinkInner = null;
+      const _thinkThrottle = createLiveThinkingThrottle((html) => {
+        if (_liveThinkInner) _liveThinkInner.innerHTML = html;
+      }, { delay: 80 });
       let _liveThinkHeader = null;
       let _liveThinkSpinnerSlot = null;
       let _liveThinkTimerEl = null;
@@ -1419,6 +1423,7 @@ function _doc() {
               }
               // Force-close thinking if still open (model never output boundary)
               if (isThinking) {
+                _thinkThrottle.flush();
                 isThinking = false;
                 cancelAnimationFrame(_thinkTimerRAF);
                 var _elapsedDone = thinkingStartTime ? ((Date.now() - thinkingStartTime) / 1000).toFixed(1) : null;
@@ -1648,13 +1653,12 @@ function _doc() {
                 } else if (hasUnclosedThink && isThinking) {
                   if (_liveThinkInner) {
                     // Extract raw thinking text (strip known thinking wrappers and prefixes)
-                    var thinkText = roundText
-                      .replace(/<\/?(?:think(?:ing)?|thought)(?:\s+[^>]*)?>/gi, '')
+                    var thinkText = stripLiveThinkingTags(roundText)
                       .replace(/<\|channel>thought\s*\n?/gi, '')
                       .replace(/<\|channel>response\s*\n?/gi, '')
                       .replace(/<channel\|>/gi, '');
                     thinkText = thinkText.replace(/^\s*Thinking(?:\s+Process)?:\s*/i, '');
-                    _liveThinkInner.innerHTML = markdownModule.mdToHtml(thinkText);
+                    _thinkThrottle.update(markdownModule.mdToHtml(thinkText));
                     // Keep thinking box scrolled to bottom, but let user scroll up
                     var thinkBox = _liveThinkInner.closest('.thinking-content');
                     if (thinkBox) {
@@ -1665,6 +1669,7 @@ function _doc() {
                   uiModule.scrollHistory();
                   continue;
                 } else if (!hasUnclosedThink && isThinking) {
+                  _thinkThrottle.flush();
                   isThinking = false;
                   var _thinkTextLen = _liveThinkInner ? _liveThinkInner.textContent.trim().length : 0;
 
@@ -2097,6 +2102,7 @@ function _doc() {
                 _removeThinkingSpinner();
                 // Force-close thinking if still open — tools are real content, not thinking
                 if (isThinking) {
+                  _thinkThrottle.flush();
                   isThinking = false;
                   cancelAnimationFrame(_thinkTimerRAF);
                   var _elapsed2 = thinkingStartTime ? ((Date.now() - thinkingStartTime) / 1000).toFixed(1) : null;

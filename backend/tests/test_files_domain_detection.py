@@ -89,8 +89,8 @@ def test_files_domain_toolset_includes_write_edit_and_tests():
     # The seed only matters because it pulls the right tools. Pin the
     # full toolset the files domain is supposed to contribute.
     files_tools = _DOMAIN_TOOL_MAP["files"]
-    for must_have in ("write_file", "edit_file", "read_file",
-                      "run_tests", "lint", "format",
+    for must_have in ("write_file", "edit_file", "apply_patch", "read_file",
+                      "run_tests", "lint", "format", "manage_bg_jobs",
                       "bash", "python", "grep", "glob", "ls"):
         assert must_have in files_tools, (
             f"files domain toolset missing {must_have!r} — would break "

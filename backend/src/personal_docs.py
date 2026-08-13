@@ -7,6 +7,7 @@ from typing import List, Dict, Set, Any, Tuple
 from dataclasses import dataclass
 
 from src.markitdown_runtime import MARKITDOWN_EXTS
+from src.index_walk import prune_index_dirs, is_indexable_file
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +97,11 @@ def load_personal_index(
 ) -> List[Dict[str, Any]]:
     """Load and index personal documents."""
     files = []
-    for root, _, names in os.walk(personal_dir):
+    for root, dirs, names in os.walk(personal_dir):
+        prune_index_dirs(dirs)
         for name in sorted(names):
+            if not is_indexable_file(name):
+                continue
             p = os.path.join(root, name)
             if not os.path.isfile(p):
                 continue

@@ -14,6 +14,7 @@ import numpy as np
 from typing import List, Dict, Any, Optional, Set
 
 from src.constants import CHROMA_DIR
+from src.index_walk import prune_index_dirs, is_indexable_file
 from pathlib import Path
 
 from src.embedding_lanes import (
@@ -497,8 +498,11 @@ class VectorRAG:
         failed = 0
 
         try:
-            for root, _, files in os.walk(directory):
+            for root, dirs, files in os.walk(directory):
+                prune_index_dirs(dirs)
                 for fname in files:
+                    if not is_indexable_file(fname):
+                        continue
                     fpath = os.path.join(root, fname)
                     ext = Path(fname).suffix.lower()
                     if ext not in file_extensions:

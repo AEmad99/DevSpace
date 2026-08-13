@@ -42,3 +42,5 @@ def test_setup_chatgpt_subscription_prints_auth_url_without_auto_opening_tab():
     assert "authUrl" in flow_block
     assert 'href="\' + uiModule.esc(authUrl || \'\') + \'"' in flow_block
     assert "if (providerKey === 'chatgpt-subscription') return;" in flow_block
+    assert "openExternalUrl(url)" in flow_block
+    assert "from './nativeDialog.js'" in _SLASH

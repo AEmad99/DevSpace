@@ -13,11 +13,21 @@
     "core:default",
     "dialog:allow-open",
     "notification:default",
+    "opener:allow-default-urls",
     {
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "http://127.0.0.1:*/*" },
-        { "url": "http://localhost:*/*" }
+        { "url": "http://localhost:*/*" },
+        { "url": "https://*" },
+        { "url": "https://auth.x.ai/*" },
+        { "url": "https://accounts.x.ai/*" },
+        { "url": "https://*.x.ai/*" },
+        { "url": "https://x.ai/*" },
+        { "url": "https://github.com/*" },
+        { "url": "https://*.github.com/*" },
+        { "url": "https://auth.openai.com/*" },
+        { "url": "https://*.openai.com/*" }
       ]
     }
   ]

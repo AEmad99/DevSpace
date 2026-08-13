@@ -51,6 +51,9 @@ def test_device_auth_keeps_manual_auth_button_without_auto_opening_tab():
     assert "adm-device-auth-copy" in auth_block
     assert "openWindow: () => {}" in auth_block
     assert "A new tab opened" not in auth_block
+    assert "openExternalUrl" in auth_block
+    assert "e.preventDefault()" in auth_block
+    assert "from './nativeDialog.js'" in _ADMIN
 
 
 def test_grok_subscription_is_a_device_flow_provider():
@@ -58,6 +61,22 @@ def test_grok_subscription_is_a_device_flow_provider():
     assert "startUrl: '/api/grok-subscription/device/start'" in _DEVICE_FLOW
     assert "pollUrl: '/api/grok-subscription/device/poll'" in _DEVICE_FLOW
     assert "verification_uri_complete" in _DEVICE_FLOW
+
+
+def test_desktop_opener_allows_provider_oauth_hosts():
+    caps = (
+        Path(__file__).resolve().parents[2]
+        / "src-tauri"
+        / "capabilities"
+        / "default.json"
+    ).read_text(encoding="utf-8")
+    assert "opener:allow-open-url" in caps
+    assert "opener:allow-default-urls" in caps
+    assert "https://*" in caps
+    assert "https://auth.x.ai/*" in caps
+    assert "https://accounts.x.ai/*" in caps
+    assert "https://github.com/*" in caps
+    assert "https://auth.openai.com/*" in caps
 
 
 def test_loud_oauth_copy_and_removed_button_hooks_do_not_return():

@@ -514,11 +514,11 @@ pub fn run() {
         // matching `remote.urls` entry in capabilities/default.json is what lets
         // the frontend reach this plugin's `open` command.
         .plugin(tauri_plugin_dialog::init())
-        // Lets the frontend open external URLs (e.g. the deep-research Visual
-        // Report) in the system browser. window.open('_blank') does nothing
-        // from the remote-origin webview, so the report button invokes
-        // `plugin:opener|open_url` instead. Scoped to the loopback origin in
-        // capabilities/default.json.
+        // Lets the frontend open external URLs in the system browser.
+        // window.open('_blank') is a silent no-op from the remote-origin
+        // webview, so callers (Visual Report, Grok/Copilot/ChatGPT device
+        // auth) invoke `plugin:opener|open_url` instead. Scoped in
+        // capabilities/default.json to loopback plus the OAuth hosts.
         .plugin(tauri_plugin_opener::init())
         // Native OS notifications — the frontend pings these when a deep-research
         // or agent run finishes while the window isn't focused. Reachable from the

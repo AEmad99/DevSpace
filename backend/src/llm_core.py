@@ -1,6 +1,7 @@
 # src/llm_core.py
 import httpx
 import asyncio
+import copy
 import time
 import json
 import logging
@@ -466,7 +467,7 @@ def _build_ollama_payload(
     if options:
         payload["options"] = options
     if tools:
-        payload["tools"] = tools
+        payload["tools"] = _alias_harmony_tools(tools, model)
     return payload
 
 
@@ -1091,7 +1092,47 @@ def _anthropic_rejects_temperature(model: str) -> bool:
     return (int(match.group(1)), int(match.group(2))) >= (4, 7)
 
 # Models that support structured thinking — may output </think> without opening tag
-_THINKING_MODEL_PATTERNS = ("qwen3", "qwq", "deepseek-r1", "deepseek-reasoner", "minimax", "m2-reap", "gemma")
+_THINKING_MODEL_PATTERNS = (
+    "qwen3", "qwq", "deepseek-r1", "deepseek-reasoner", "deepseek-v4",
+    "minimax", "m2-reap", "gemma",
+)
+
+# gpt-oss (harmony) ships built-in tools named python/bash/browser. Exposing
+# our tools under those names makes the model emit raw bodies instead of JSON.
+# Rename on the way out and map back on the way in. Transport-only, gpt-oss only.
+_HARMONY_TOOL_ALIASES = {
+    "python": "run_python_code",
+    "bash": "run_shell_command",
+    "browser": "web_browser_tool",
+}
+_HARMONY_TOOL_ALIASES_REVERSE = {v: k for k, v in _HARMONY_TOOL_ALIASES.items()}
+
+
+def _is_harmony_model(model: str) -> bool:
+    """True for gpt-oss / harmony-format models, which have built-in tool names."""
+    return "gpt-oss" in (model or "").lower()
+
+
+def _alias_harmony_tools(tools: Optional[List[Dict]], model: str) -> Optional[List[Dict]]:
+    """Rename tools that collide with harmony built-ins. Returns a copy."""
+    if not tools or not _is_harmony_model(model):
+        return tools
+    out = []
+    for t in tools:
+        fn = t.get("function") or {}
+        alias = _HARMONY_TOOL_ALIASES.get(fn.get("name"))
+        if alias:
+            t = copy.deepcopy(t)
+            t["function"]["name"] = alias
+        out.append(t)
+    return out
+
+
+def _unalias_harmony_tool_name(name: str, model: str) -> str:
+    """Map an aliased tool name in a model response back to the real name."""
+    if not _is_harmony_model(model):
+        return name
+    return _HARMONY_TOOL_ALIASES_REVERSE.get(name, name)
 
 def _supports_thinking(model: str) -> bool:
     """Check if model supports structured thinking output."""
@@ -2012,7 +2053,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
             tok_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
             payload[tok_key] = max_tokens
         if tools:
-            payload["tools"] = tools
+            payload["tools"] = _alias_harmony_tools(tools, model)
         # For Ollama's OpenAI-compat /v1 endpoint with thinking models (qwen3,
         # gemma4, etc.), suppress thinking so tool calls aren't swallowed inside
         # <think> blocks. Ollama /v1 accepts "think": false as a top-level param.
@@ -2158,7 +2199,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                         if fn.get("name"):
                             _ollama_tool_calls.append({
                                 "id": tc.get("id") or f"call_{len(_ollama_tool_calls)}",
-                                "name": fn.get("name") or "",
+                                "name": _unalias_harmony_tool_name(fn.get("name") or "", model),
                                 "arguments": json.dumps(fn.get("arguments") or {}),
                             })
                     if j.get("done"):
@@ -2621,7 +2662,7 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
                                             if tc.get("extra_content"):
                                                 _tc_acc[idx]["extra_content"] = tc["extra_content"]
                                             if func.get("name"):
-                                                _tc_acc[idx]["name"] = func["name"]
+                                                _tc_acc[idx]["name"] = _unalias_harmony_tool_name(func["name"], model)
                                             if "arguments" in func:
                                                 # Guard against a null arguments delta: `func` can be
                                                 # {"arguments": None} (JSON null), and a raw `+= None`

@@ -303,7 +303,7 @@ _DOMAIN_TOOL_MAP = {
     "notes_calendar_tasks": {"manage_notes", "manage_calendar", "manage_tasks"},
     "ui": {"ui_control"},
     "sessions": {"create_session", "list_sessions", "manage_session", "send_to_session", "search_chats"},
-    "files": {"bash", "python", "read_file", "write_file", "edit_file", "grep", "glob", "ls", "get_workspace", "run_tests", "lint", "format", "spawn_agent", "manage_todos"},
+    "files": {"bash", "python", "read_file", "write_file", "edit_file", "apply_patch", "grep", "glob", "ls", "get_workspace", "run_tests", "lint", "format", "spawn_agent", "manage_todos", "manage_bg_jobs"},
     "settings": {"manage_settings", "manage_endpoints", "manage_mcp", "manage_webhooks", "manage_tokens", "app_api"},
     "contacts": {"resolve_contact", "manage_contact"},
     "integrations": {"api_call"},
@@ -379,7 +379,19 @@ Write content to a file. First line is the path, rest is the content.""",
 ```edit_file
 {"path": "<file path>", "old_string": "<exact text to replace>", "new_string": "<replacement>", "replace_all": false}
 ```
-Edit an EXISTING file by exact string replacement. PREFER this over bash (sed/echo/redirects) for changing files — it shows a before/after diff. `old_string` must match the file exactly and be unique unless `replace_all` is true. Use write_file to create a new file.""",
+Edit an EXISTING file by exact string replacement. PREFER this over bash (sed/echo/redirects) for changing files — it shows a before/after diff. `old_string` must match the file exactly and be unique unless `replace_all` is true. Use write_file to create a new file. For several related file edits, prefer `apply_patch`.""",
+
+    "apply_patch": """\
+```apply_patch
+{"patch_text": "*** Begin Patch\\n*** Update File: path\\n@@\\n-old\\n+new\\n*** End Patch"}
+```
+Apply a multi-file source patch to disk. Required for grouped project edits. Must start with `*** Begin Patch` and end with `*** End Patch`. Prefer this over bash redirects/heredocs/sed.""",
+
+    "manage_bg_jobs": """\
+```manage_bg_jobs
+{"action": "list"}
+```
+List, read, or kill detached `#!bg` bash jobs in this chat. Actions: `list`, `output` (needs `job_id`), `kill` (needs `job_id`).""",
 
     "get_workspace": """\
 ```get_workspace

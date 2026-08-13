@@ -86,6 +86,13 @@ export async function runProviderDeviceFlow(provider, options = {}) {
   if (!fetchImpl) throw new Error('Fetch API is unavailable');
 
   const openWindow = options.openWindow || ((url) => {
+    if (!url) return;
+    // Desktop webview: window.open('_blank') is a no-op. Prefer the
+    // Tauri opener bridge that nativeDialog.js exposes globally.
+    if (typeof globalThis.openExternalUrl === 'function') {
+      globalThis.openExternalUrl(url);
+      return;
+    }
     if (globalThis.window && typeof globalThis.window.open === 'function') {
       globalThis.window.open(url, '_blank', 'noopener');
     }

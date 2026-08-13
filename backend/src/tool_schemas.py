@@ -169,7 +169,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Edit a file ON DISK by exact string replacement (home folder, project files, any real path like ~/sweden.txt or /path/to/file). This is the right tool for files on disk — NOT edit_document (that's for editor-panel documents). PREFER this over bash (sed/echo) — it shows a diff. old_string must match the file exactly and be unique (or set replace_all). Use write_file to create a new file.",
+            "description": "Edit a file ON DISK by exact string replacement (home folder, project files, any real path like ~/sweden.txt or /path/to/file). This is the right tool for files on disk — NOT edit_document (that's for editor-panel documents). PREFER this over bash (sed/echo) — it shows a diff. old_string must match the file exactly and be unique (or set replace_all). Use write_file to create a new file. For several related file edits, prefer apply_patch.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -179,6 +179,42 @@ FUNCTION_TOOL_SCHEMAS = [
                     "replace_all": {"type": "boolean", "description": "Replace all occurrences instead of requiring a unique match"}
                 },
                 "required": ["path", "old_string", "new_string"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_patch",
+            "description": "Apply a multi-file source-code patch to disk. Use for real project files in the workspace when several edits belong together. Patch must use *** Begin Patch / *** End Patch with Add File, Update File, or Delete File sections. Prefer this over bash redirects/heredocs/sed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patch_text": {
+                        "type": "string",
+                        "description": "Patch text beginning with *** Begin Patch and ending with *** End Patch"
+                    }
+                },
+                "required": ["patch_text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_bg_jobs",
+            "description": "List, read output from, or kill detached background bash jobs started with a #!bg marker in this chat. Jobs are scoped to the current conversation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "output", "kill"],
+                        "description": "list = jobs in this chat; output = read a job's output; kill = stop a running job"
+                    },
+                    "job_id": {"type": "string", "description": "Required for output and kill"}
+                },
+                "required": ["action"]
             }
         }
     },

@@ -8,6 +8,7 @@ import uiModule from './ui.js';
 import { _diagnose, _showDiagnosis, _clearDiagnosis } from './cookbook-diagnosis.js';
 import { registerMenuDismiss } from './escMenuStack.js';
 import { computeProgressSignal } from './cookbookProgressSignal.js';
+import { portOf, nextFreePort } from './cookbookPorts.js';
 
 // Human-friendly badge label for a task's internal status. Avoids surfacing
 // the word "error" in the sidebar — a server the user stopped or one that
@@ -362,16 +363,14 @@ function _nextAvailablePort() {
   const usedPorts = new Set();
   tasks.forEach(t => {
     if (t.type === 'serve' && (t.status === 'running' || t.status === 'queued')) {
-      const m = t.payload?._cmd?.match(/--port\s+(\d+)/);
-      if (m) usedPorts.add(parseInt(m[1]));
+      const p = portOf(t.payload?._cmd);
+      if (p) usedPorts.add(parseInt(p, 10));
     }
   });
   presets.forEach(p => {
-    if (p.port) usedPorts.add(parseInt(p.port));
+    if (p.port) usedPorts.add(parseInt(p.port, 10));
   });
-  let port = 8000;
-  while (usedPorts.has(port)) port++;
-  return String(port);
+  return nextFreePort(usedPorts, 8000);
 }
 
 // ── Endpoint cleanup ──

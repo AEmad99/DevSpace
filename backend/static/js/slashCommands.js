@@ -22,6 +22,7 @@ import settingsModule from './settings.js';
 import cookbookModule from './cookbook.js';
 import { EVAL_PROMPTS } from './compare/index.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
+import { openExternalUrl } from './nativeDialog.js';
 
 // ── Module state ──────────────────────────────────────────────────────
 
@@ -5108,7 +5109,7 @@ async function _setupProviderDeviceFlow(providerKey) {
       },
       openWindow: (url) => {
         if (providerKey === 'chatgpt-subscription') return;
-        try { if (url) window.open(url, '_blank', 'noopener'); } catch (e) {}
+        if (url) openExternalUrl(url);
       },
     });
     if (result.status === 'authorized') {

@@ -6,6 +6,7 @@ import settingsModule from './settings.js';
 import { providerLogo, providerLogoFromUrl } from './providers.js';
 import { sortModelObjects } from './modelSort.js';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
+import { openExternalUrl } from './nativeDialog.js';
 
 let initialized = false;
 let modalEl = null;
@@ -1162,6 +1163,17 @@ function initEndpointForm() {
               '</div>' +
               '<a class="admin-btn-add adm-copilot-auth" href="' + encodeURI(authUrl || '') + '" target="_blank" rel="noopener">' + esc(authLabel) + ' ↗</a>' +
             '</div>';
+          const authLink = status.querySelector('.adm-copilot-auth');
+          if (authLink) {
+            // Wry/WebView2 treats target=_blank as a silent no-op. Route
+            // through the Tauri opener so Authorize with xAI/GitHub/OpenAI
+            // actually launches the system browser.
+            authLink.addEventListener('click', (e) => {
+              if (!authUrl) return;
+              e.preventDefault();
+              openExternalUrl(authUrl);
+            });
+          }
           const copyBtn = status.querySelector('.adm-device-auth-copy');
           if (copyBtn) copyBtn.addEventListener('click', async () => {
             const code = start.user_code || '';

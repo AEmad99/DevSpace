@@ -8,15 +8,33 @@ from typing import Optional, Set
 logger = logging.getLogger(__name__)
 
 
+# Built-in email MCP tool names. Single source of truth for fence tags and
+# native-call mapping in tool_parsing / tool_schemas.
+BUILTIN_EMAIL_TOOLS = frozenset({
+    "list_email_accounts",
+    "list_emails",
+    "read_email",
+    "send_email",
+    "reply_to_email",
+    "archive_email",
+    "delete_email",
+    "mark_email_read",
+    "bulk_email",
+    "download_attachment",
+})
+
+
 # Tools regular/public users must not execute directly. These either expose
 # server/runtime access, sensitive user data, external messaging, persistent
 # state changes, or generic loopback/integration surfaces.
-NON_ADMIN_BLOCKED_TOOLS = {
+NON_ADMIN_BLOCKED_TOOLS = BUILTIN_EMAIL_TOOLS | {
     "bash",
     "python",
+    "manage_bg_jobs",
     "read_file",
     "write_file",
     "edit_file",
+    "apply_patch",
     "grep",
     "glob",
     "ls",

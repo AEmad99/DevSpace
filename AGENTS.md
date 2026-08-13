@@ -18,6 +18,69 @@ Tauri shell owns backend lifecycle (Windows Job Object kill-on-close).
 Deeper architecture: `docs/APPLICATION_OVERVIEW.md`. Code Workspace history:
 `docs/HANDOFF.md`, `docs/code-workspace-plan.md`.
 
+---
+
+## Feature Surface & Capabilities
+
+### 1. Code Workspace (Built-in IDE & Developer Surface)
+- **3-Pane Modal UI**: File tree with lazy expansion & fuzzy search, Monaco 0.52.2 Code Editor (offline vendored bundle), Diff viewer, Terminal, and Git panel.
+- **Language Server Protocol (LSP)**: WebSocket bridge (`/api/lsp/{lang}`) supporting Python (`pylsp`), TypeScript (`typescript-language-server`), and Rust (`rust-analyzer`) for diagnostics, hover, autocomplete, and go-to-definition.
+- **Interactive Terminal**: Real PTY WebSocket (`WS /api/workspace/pty`) backed by xterm.js and `pywinpty` for interactive shell access, plus owner-authed streaming shell (`POST /api/workspace/shell`).
+- **First-Class Git Integration**: Native structured tools (`git_status`, `git_diff`, `git_log`, `git_blame`, `git_commit`, `git_branch`) and in-app Git Panel for staging, unstage, and committing.
+- **Native Code Quality Tools**: Auto-detected execution of test runners (`run_tests` for pytest, npm, go, cargo), linters (`lint` for ruff, eslint, flake8), and formatters (`format` for black, prettier, ruff).
+- **Edit Review & Checkpoints**: Review mode (`agent_edit_review`: `"strict"` default staging vs `"auto"` keep/revert), `GET /api/workspace/checkpoints` endpoint, session rollback (`POST /api/workspace/revert_all`), and open-in-editor deep-links from chat diff cards.
+- **Direct File Mentions**: `@filename` autocomplete popup in chat (`fileMentionAutocomplete.js`) searching workspace files.
+
+### 2. Autonomous AI Agent & Execution Loop
+- **Multi-Provider LLM Streaming**: Streaming SSE loop supporting Ollama, LM Studio, llama.cpp, OpenAI, Anthropic, OpenRouter, GitHub Copilot, ChatGPT subscription, Venice, Gemini, and Groq.
+- **Soft Auto-Continue**: `agent_auto_continue` allowing turns beyond `agent_max_rounds` up to `agent_max_rounds_ceiling` (default 150) with status chips and TODO state re-anchoring.
+- **Sub-Agent Spawning**: `spawn_agent` tool launching nested sub-agents with isolated contexts and domain presets (`explore`, `code`, `general`).
+- **Agent Todo List**: `manage_todos` tool to maintain progress checklists on multi-step turns.
+- **Output Summarization**: Automatic head/tail/interesting-error line preservation for large stdout/stderr outputs (>10 KB) from bash and Python executions.
+- **Coding Verifier & Nudges**: Heuristic-driven completion verifier subagent for coding turns and loop-side `edit-then-verify` reminders after unverified file modifications.
+- **Project Orientation**: `project_bootstrap` tool providing instant one-call project architecture, dependency, test, and instruction file detection.
+- **Semantic Tool Selection**: RAG indexing over tool schemas (`src/tool_index.py`) and prompt-budget enforcement (`tests/test_agent_prompt_budget.py`).
+
+### 3. Deep Research & Knowledge Systems
+- **Deep Web Research**: Multi-step background research engine (`deep_research.py`, `/api/research`) with recursive web navigation, source extraction, and interactive browser reports.
+- **Vector Document RAG**: Embedded ChromaDB persistent store for personal documents, codebase RAG, and semantic context retrieval.
+- **Knowledge Base & Sources**: Knowledge Base CRUD operations and pluggable research source registry.
+
+### 4. Cookbook & Hardware-Aware Model Management
+- **Hardware Fitting (`hwfit`)**: Automatic local GPU, CPU, and RAM analysis tab ("What Fits?") recommending model sizes and quantizations.
+- **HuggingFace Explorer & Downloader**: Search, download management, and local model caching.
+- **Local Model Serving**: Launching and managing local inference instances via llama.cpp, vLLM, and SGLang presets.
+
+### 5. Document Editor & Writing Suite
+- **Artifact Canvas**: Writing-first document editor with inline AI edits, structural suggestions, and live Markdown/HTML/CSV preview.
+- **Document Library**: Categorization by language and topic with multi-format export capabilities (PDF, Word `.docx`, HTML).
+
+### 6. Email & Inbox Management
+- **Full IMAP/SMTP Client**: Multi-account email inbox, triage tags, AI email summaries, reminders, drafts, reply composition, and Gmail OAuth integration.
+
+### 7. Notes, Tasks & Calendar Sync
+- **Google Keep-Style Notes**: Quick note-taking, checklists, and note search.
+- **Task Scheduler**: Persistent background job runner (`task_scheduler.py`) and internal event bus.
+- **Calendar & CalDAV**: Full calendar view with CalDAV synchronization and Gmail focus-time event writebacks.
+
+### 8. Gallery & Creative Tools
+- **Image Library**: AI image generation (`generate_image`), image editor (`edit_image`) with layer drafts, and reusable image signatures/stamps.
+
+### 9. Compare (A/B Model Evaluation)
+- **Model Arena**: Blind side-by-side model comparison with automated synthesis and comparative scoring.
+
+### 10. Skills & Memory Engine
+- **User-Editable Skills**: `SKILL.md` library with owner backfill and background nightly self-audit/auto-fix loops.
+- **Persistent & Vector Memory**: Long-term fact storage, memory recall, and memory auditing.
+
+### 11. MCP, API Tokens & External Integration Bridges
+- **Model Context Protocol (MCP)**: Built-in MCP server manager and client connection handler (`/api/mcp/*`).
+- **Scoped API Tokens**: External integration support via bearer tokens (`ody_...`) with fine-grained permission scopes.
+- **External Bridges**: HTTP bridges for Codex (`/api/codex/*`) and downloadable Claude Code plugin bundle (`/api/claude/plugin.zip`).
+- **Webhooks & Companion Devices**: Custom incoming/outgoing webhooks and companion device pairing endpoints.
+
+---
+
 ## Layout
 
 | Path | Role |
@@ -34,6 +97,8 @@ Deeper architecture: `docs/APPLICATION_OVERVIEW.md`. Code Workspace history:
 Runtime data (`backend/data/`), secrets (`.env`), and bundled resources
 (`src-tauri/resources/`) are **gitignored** — never commit them.
 
+---
+
 ## Version sources (keep in sync)
 
 Bump **all** of these together on a release:
@@ -44,6 +109,8 @@ Bump **all** of these together on a release:
 - `backend/src/constants.py` → `APP_VERSION` (served by `GET /api/version`)
 
 Installer artifact name comes from Tauri: `DevSpace_<version>_x64-setup.exe`.
+
+---
 
 ## Dev commands
 
@@ -92,6 +159,8 @@ Output: `src-tauri/target/release/bundle/nsis/DevSpace_*_x64-setup.exe`.
 
 Requires on PATH: `uv`, `cargo`, Tauri CLI (`tauri` or `cargo-tauri`).
 
+---
+
 ## Coding conventions
 
 ### Backend (Python)
@@ -132,6 +201,8 @@ When changing agent tools or prompts:
 - Prefer first-class tools (`git_status`, `run_tests`, …) over raw `bash` for
   common operations so output stays structured and confined.
 
+---
+
 ## Safety / do not
 
 - Do not commit `.env`, API keys, PATs, cookies, or `backend/data/`.
@@ -140,6 +211,8 @@ When changing agent tools or prompts:
 - Do not bundle secrets into the installer resources tree.
 - Skip local agent scratch (`.codex/`, `.claude/`) and one-off patch scripts
   unless the user asks to keep them.
+
+---
 
 ## Where to look first
 
@@ -152,8 +225,11 @@ When changing agent tools or prompts:
 | Installer pipeline | `scripts/build_installer.ps1` |
 | Release notes pattern | GitHub releases + `RELEASE-v1.1.1.md` (historical packaging notes) |
 
+---
+
 ## Bias to action
 
 Read only what you need, make the smallest correct change, and verify with a
 targeted test or a quick manual path (`tauri dev` / pytest slice). Prefer
 updating existing modules over inventing parallel systems.
+

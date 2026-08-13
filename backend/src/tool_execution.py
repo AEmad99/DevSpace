@@ -540,6 +540,9 @@ async def _direct_fallback(
     tool: str,
     content: str,
     progress_cb: Optional[Callable[[Dict], Awaitable[None]]] = None,
+    session_id: Optional[str] = None,
+    owner: Optional[str] = None,
+    workspace: Optional[str] = None,
 ) -> Optional[Dict]:
     _subproc_env = {
         **os.environ,
@@ -553,6 +556,9 @@ async def _direct_fallback(
         ctx = {
             "progress_cb": progress_cb,
             "subproc_env": _subproc_env,
+            "session_id": session_id,
+            "owner": owner,
+            "workspace": workspace or get_active_workspace(),
         }
 
         from src.agent_tools import TOOL_HANDLERS
@@ -590,12 +596,12 @@ _SUBAGENT_TOOLSETS = {
     "explore": {"read_file", "grep", "glob", "ls", "get_workspace", "web_search", "web_fetch",
                 "git_status", "git_diff", "git_log", "git_blame",
                 "project_bootstrap"},
-    "code": {"read_file", "write_file", "edit_file", "grep", "glob", "ls",
-             "get_workspace", "bash", "run_tests", "lint", "format",
+    "code": {"read_file", "write_file", "edit_file", "apply_patch", "grep", "glob", "ls",
+             "get_workspace", "bash", "run_tests", "lint", "format", "manage_bg_jobs",
              "git_status", "git_diff", "git_log", "git_blame", "git_commit", "git_branch",
              "project_bootstrap"},
-    "general": {"read_file", "write_file", "edit_file", "grep", "glob", "ls",
-                "get_workspace", "bash", "run_tests", "lint", "format",
+    "general": {"read_file", "write_file", "edit_file", "apply_patch", "grep", "glob", "ls",
+                "get_workspace", "bash", "run_tests", "lint", "format", "manage_bg_jobs",
                 "web_search", "web_fetch", "python",
                 "git_status", "git_diff", "git_log", "git_blame", "git_commit", "git_branch",
                 "project_bootstrap"},
@@ -1023,7 +1029,7 @@ async def _execute_tool_block_impl(
     # `todo_update` SSE event AND persists, so the open items can be re-injected
     # at each auto-continue checkpoint to keep a long task on-track. Does NOT
     # end the turn. Accepts either a structured list or a markdown checklist.
-    if tool == "manage_todos":
+    if tool in ("manage_todos", "todowrite"):
         import json as _json
         raw = (content or "").strip()
         try:
@@ -1041,7 +1047,7 @@ async def _execute_tool_block_impl(
             lines, todos = [], []
             for it in items:
                 if isinstance(it, dict):
-                    text = str(it.get("text") or it.get("title") or it.get("task") or "").strip()
+                    text = str(it.get("text") or it.get("content") or it.get("title") or it.get("task") or "").strip()
                     status = str(it.get("status") or it.get("state") or "pending").strip().lower()
                 elif isinstance(it, str):
                     text, status = it.strip(), "pending"
@@ -1130,7 +1136,9 @@ async def _execute_tool_block_impl(
                     f"Started background job `{rec['id']}`. It is running detached — "
                     f"do NOT wait for it or poll it. You will be automatically re-invoked "
                     f"with its full output when it finishes. Continue with other work, or "
-                    f"end your turn now and resume when the result arrives."
+                    f"end your turn now and resume when the result arrives. If the user "
+                    f"later asks to check progress or stop it, call the manage_bg_jobs "
+                    f"tool (output or kill); do not tell them to run a tool command."
                 ),
                 "exit_code": 0,
                 "bg_job_id": rec["id"],
@@ -1256,6 +1264,12 @@ async def _execute_tool_block_impl(
     elif tool == "edit_file":
         result = await _direct_fallback(tool, content) or {"error": "edit failed", "exit_code": 1}
         desc = result.get("output") or result.get("error") or "edit_file"
+    elif tool == "apply_patch":
+        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner, workspace=workspace) or {"error": "apply_patch failed", "exit_code": 1}
+        desc = result.get("output") or result.get("error") or "apply_patch"
+    elif tool == "manage_bg_jobs":
+        desc = f"manage_bg_jobs: {content.split(chr(10))[0][:80]}"
+        result = await _direct_fallback(tool, content, session_id=session_id, owner=owner) or {"error": "manage_bg_jobs: execution failed", "exit_code": 1}
     elif tool.startswith("git_") and tool in {
         "git_status", "git_diff", "git_log", "git_blame", "git_commit", "git_branch",
     }:
