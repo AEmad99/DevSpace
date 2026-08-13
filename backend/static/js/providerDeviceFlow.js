@@ -17,6 +17,14 @@ export const PROVIDER_DEVICE_FLOWS = {
       return start?.verification_uri || '';
     },
   },
+  'grok-subscription': {
+    label: 'Grok Subscription',
+    startUrl: '/api/grok-subscription/device/start',
+    pollUrl: '/api/grok-subscription/device/poll',
+    authUrl(start) {
+      return start?.verification_uri_complete || start?.verification_uri || '';
+    },
+  },
 };
 
 function _formData() {

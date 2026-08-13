@@ -6,6 +6,7 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 _INDEX = (_REPO / "static" / "index.html").read_text(encoding="utf-8")
 _ADMIN = (_REPO / "static" / "js" / "admin.js").read_text(encoding="utf-8")
+_DEVICE_FLOW = (_REPO / "static" / "js" / "providerDeviceFlow.js").read_text(encoding="utf-8")
 
 
 def _between(src: str, start: str, end: str) -> str:
@@ -17,6 +18,7 @@ def _between(src: str, start: str, end: str) -> str:
 def test_copilot_and_chatgpt_subscription_are_dropdown_device_auth_options():
     assert 'value="copilot" data-logo="github" data-auth-flow="copilot">GitHub Copilot' in _INDEX
     assert 'value="chatgpt-subscription" data-logo="openai" data-auth-flow="chatgpt-subscription">ChatGPT Subscription' in _INDEX
+    assert 'value="grok-subscription" data-logo="grok" data-auth-flow="grok-subscription">Grok Subscription' in _INDEX
     assert 'id="adm-deviceAuthStatus"' in _INDEX
 
 
@@ -44,10 +46,18 @@ def test_device_auth_keeps_manual_auth_button_without_auto_opening_tab():
 
     assert "Authorize with OpenAI" in auth_block
     assert "Authorize on GitHub" in auth_block
+    assert "Authorize with xAI" in auth_block
     assert "adm-copilot-panel" in auth_block
     assert "adm-device-auth-copy" in auth_block
     assert "openWindow: () => {}" in auth_block
     assert "A new tab opened" not in auth_block
+
+
+def test_grok_subscription_is_a_device_flow_provider():
+    assert "'grok-subscription':" in _DEVICE_FLOW
+    assert "startUrl: '/api/grok-subscription/device/start'" in _DEVICE_FLOW
+    assert "pollUrl: '/api/grok-subscription/device/poll'" in _DEVICE_FLOW
+    assert "verification_uri_complete" in _DEVICE_FLOW
 
 
 def test_loud_oauth_copy_and_removed_button_hooks_do_not_return():

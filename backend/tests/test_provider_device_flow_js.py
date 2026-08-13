@@ -95,6 +95,37 @@ def test_chatgpt_success_uses_plain_verification_uri():
     assert out["opened"] == ["https://auth.openai.com/codex/device"]
 
 
+def test_grok_success_uses_complete_verification_uri():
+    js = f"""
+      import {{ runProviderDeviceFlow }} from '{_HELPER.as_posix()}';
+      const opened = [];
+      const response = (ok, status, payload) => ({{ ok, status, async json() {{ return payload; }} }});
+      const fetchImpl = async (url) => {{
+        if (url.endsWith('/device/start')) {{
+          return response(true, 200, {{
+            poll_id: 'poll-1',
+            user_code: 'XK-CODE',
+            verification_uri: 'https://auth.x.ai/oauth2/device',
+            verification_uri_complete: 'https://auth.x.ai/oauth2/device?user_code=XK-CODE',
+            interval: 2,
+            expires_in: 30,
+          }});
+        }}
+        return response(true, 200, {{ status: 'authorized', endpoint: {{ id: 'grok', models: ['grok-4.6'] }} }});
+      }};
+      const result = await runProviderDeviceFlow('grok-subscription', {{
+        fetchImpl,
+        openWindow: (url) => opened.push(url),
+        sleep: async () => {{}},
+        now: () => 0,
+      }});
+      console.log(JSON.stringify({{ result, opened }}));
+    """
+    out = _run_node(js)
+    assert out["result"]["status"] == "authorized"
+    assert out["opened"] == ["https://auth.x.ai/oauth2/device?user_code=XK-CODE"]
+
+
 def test_start_errors_surface_backend_detail():
     js = f"""
       import {{ runProviderDeviceFlow }} from '{_HELPER.as_posix()}';

@@ -948,6 +948,14 @@ def _classify_agent_request(messages: List[Dict], last_user: str) -> Dict[str, o
         domains.add("sessions")
     if has(r"\b(file|folder|directory|repo|git|grep|find in files|read file|edit file|shell|terminal|bash|python)\b"):
         domains.add("files")
+    # On-disk documentation / file creation (not the editor panel). Catches
+    # "document the application features", "write an overview.md", etc.
+    if has(
+        r"\b(?:overview|readme|changelog)\b",
+        r"\b(?:write|create|save|add|make|drop)\b.{0,50}\b(?:file|\.md|\.txt|\.py|markdown)\b",
+        r"\b(?:document|describe|documenting)\b.{0,60}\b(?:app|application|project|codebase|features?|architecture)\b",
+    ):
+        domains.add("files")
     # Coding-verb intent without naming a file/folder: "fix the bug", "refactor
     # the user service", "implement a new endpoint", "add a function to...".
     # The keyword regex above misses these, so a bare coding ask would fall
@@ -2188,15 +2196,13 @@ async def stream_agent_loop(
     if not guide_only and not _relevant_tools and bool(_intent.get("low_signal")):
         from src.tool_index import ALWAYS_AVAILABLE
         if workspace:
-            # An active workspace IS the file-work signal: a vague "look at the
-            # project" means explore this folder. Surface only the READ-ONLY file
-            # tools (intersection with the plan-mode read-only allowlist) so the
-            # agent can investigate; write/shell tools stay out until the request
-            # actually calls for them (RAG retrieval adds those on a real ask).
+            # An active workspace means the user is in coding-agent mode: give
+            # the full file/shell toolset (write_file, edit_file, bash, …) so
+            # vague follow-ups ("yes", "continue", "do it") can still land edits
+            # on disk. disabled_tools still gates bash/shell per user prefs.
             _relevant_tools = set(ALWAYS_AVAILABLE)
-            from src.tool_security import PLAN_MODE_READONLY_TOOLS
-            _relevant_tools |= (_DOMAIN_TOOL_MAP["files"] & PLAN_MODE_READONLY_TOOLS)
-            logger.info("[tool-rag] Low-signal but workspace active; including read-only file tools")
+            _relevant_tools |= _DOMAIN_TOOL_MAP["files"]
+            logger.info("[tool-rag] Low-signal but workspace active; including full file/shell tools")
         else:
             # Don't short-circuit: fall through to RAG retrieval below.
             # Non-English queries are flagged low_signal by the English-only
@@ -2255,6 +2261,11 @@ async def stream_agent_loop(
     if not guide_only and _relevant_tools is not None:
         for _domain in (_intent.get("domains") or set()):
             _relevant_tools.update(_DOMAIN_TOOL_MAP.get(str(_domain), set()))
+        # Workspace pinned → always expose the coding-agent toolset. Git panel
+        # and file tools share the same root; don't strand the model on read-only
+        # grep/glob when the user expects Claude/Cursor-style file writes.
+        if workspace:
+            _relevant_tools.update(_DOMAIN_TOOL_MAP["files"])
         if "cookbook" in (_intent.get("domains") or set()):
             _relevant_tools.update({
                 "list_served_models",

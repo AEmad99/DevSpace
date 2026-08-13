@@ -129,6 +129,7 @@ const _ENDPOINT_LABELS = [
  */
 export function providerLabel(endpointUrl) {
   if (!endpointUrl || typeof endpointUrl !== "string") return null;
+  if (/\/v1\/grok-subscription(?:\/|$)/i.test(endpointUrl)) return "Grok Subscription";
   let host;
   try {
     host = new URL(endpointUrl).hostname;

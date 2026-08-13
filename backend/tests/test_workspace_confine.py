@@ -204,17 +204,15 @@ def _sent_tool_names(monkeypatch, *, workspace):
     return {t["function"]["name"] for t in schemas if isinstance(t, dict) and "function" in t}
 
 
-def test_low_signal_with_workspace_surfaces_readonly_file_tools(monkeypatch):
+def test_low_signal_with_workspace_surfaces_full_coding_tools(monkeypatch):
     names = _sent_tool_names(monkeypatch, workspace="/tmp")
-    # read-only nav tools surface so the agent can explore
+    # Workspace pinned → full coding-agent toolset, even on a vague message
     assert "read_file" in names
     assert "get_workspace" in names
     assert "grep" in names
-    # write/shell tools do NOT surface on a vague message
-    assert "write_file" not in names
-    assert "edit_file" not in names
-    assert "bash" not in names
-    assert "python" not in names
+    assert "write_file" in names
+    assert "edit_file" in names
+    assert "bash" in names
 
 
 def test_low_signal_without_workspace_excludes_file_tools(monkeypatch):

@@ -90,12 +90,33 @@ def resolve_endpoint_runtime(ep, owner: Optional[str] = None) -> Tuple[str, Opti
     api_key = getattr(ep, "api_key", None)
     auth_id = getattr(ep, "provider_auth_id", None)
     if auth_id:
-        from src.chatgpt_subscription import resolve_runtime_credentials
-
-        creds = resolve_runtime_credentials(auth_id, owner=owner)
+        creds = _resolve_provider_auth_credentials(auth_id, owner=owner)
         base = normalize_base(creds.get("base_url") or base)
         api_key = creds.get("api_key")
     return base, api_key
+
+
+def _provider_auth_row_provider(auth_id: str, owner: Optional[str] = None) -> Optional[str]:
+    from core.database import ProviderAuthSession
+
+    db = SessionLocal()
+    try:
+        q = db.query(ProviderAuthSession).filter(ProviderAuthSession.id == auth_id)
+        if owner:
+            q = q.filter(ProviderAuthSession.owner == owner)
+        row = q.first()
+        return getattr(row, "provider", None) if row is not None else None
+    finally:
+        db.close()
+
+
+def _resolve_provider_auth_credentials(auth_id: str, owner: Optional[str] = None) -> Dict:
+    provider = _provider_auth_row_provider(auth_id, owner=owner)
+    if provider == "grok-subscription":
+        from src.grok_subscription import resolve_runtime_credentials
+        return resolve_runtime_credentials(auth_id, owner=owner)
+    from src.chatgpt_subscription import resolve_runtime_credentials
+    return resolve_runtime_credentials(auth_id, owner=owner)
 
 
 # Cache for Tailscale hostname → IP resolution
@@ -214,6 +235,8 @@ def build_chat_url(base: str) -> str:
         return _append_endpoint_path(_ollama_api_root(base), "/chat")
     if provider == "chatgpt-subscription":
         return _append_endpoint_path(base, "/responses")
+    if provider == "grok-subscription":
+        return _append_endpoint_path(base, "/chat/completions")
     # MiniMax serves two API surfaces from the same origin (api.minimax.io):
     #   * /anthropic/v1/messages — Anthropic-compatible (cache_control markers)
     #   * /v1/chat/completions   — OpenAI-compatible (passive prefix cache)
@@ -252,6 +275,9 @@ def build_models_url(base: str) -> Optional[str]:
         return _append_endpoint_path(_ollama_api_root(base), "/tags")
     if provider == "chatgpt-subscription":
         return None
+    if provider == "grok-subscription":
+        from src.grok_subscription import GROK_INFERENCE_BASE_URL
+        return _append_endpoint_path(GROK_INFERENCE_BASE_URL, "/models")
     # Mirror build_chat_url's MiniMax handling: MiniMax exposes the same
     # model catalog at /v1/models on the OpenAI-compat surface and at the
     # Anthropic-compat surface as well (probed during the previous fix).
@@ -312,6 +338,9 @@ def build_headers(api_key: Optional[str], base: str) -> Dict[str, str]:
     if provider == "chatgpt-subscription":
         from src.chatgpt_subscription import chatgpt_headers
         return chatgpt_headers(api_key)
+    if provider == "grok-subscription":
+        from src.grok_subscription import grok_headers
+        return grok_headers(api_key)
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     if provider == "openrouter":

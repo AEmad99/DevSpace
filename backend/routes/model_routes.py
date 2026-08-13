@@ -580,7 +580,7 @@ def _safe_build_headers(api_key: Optional[str], base_url: str) -> dict:
 
 
 def _is_discovery_only_provider(provider: str) -> bool:
-    return provider == "chatgpt-subscription"
+    return provider in {"chatgpt-subscription", "grok-subscription"}
 
 
 def _resolve_probe_key(ep) -> Optional[str]:
@@ -721,6 +721,11 @@ def _probe_endpoint(base_url: str, api_key: str = None, timeout: int = 5) -> Lis
     provider = _safe_detect_provider(base)
     if provider == "chatgpt-subscription":
         from src.chatgpt_subscription import fetch_available_models
+        if api_key:
+            return fetch_available_models(api_key, timeout=timeout)
+        return []
+    if provider == "grok-subscription":
+        from src.grok_subscription import fetch_available_models
         if api_key:
             return fetch_available_models(api_key, timeout=timeout)
         return []

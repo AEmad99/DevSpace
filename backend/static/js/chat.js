@@ -30,7 +30,7 @@ import slashCommands, { initSlashCommands, isCommand, handleSlashCommand, handle
 import createResearchSynapse from './researchSynapse.js';
 import { createStreamRenderer } from './streamingRenderer.js';
 import { wireArrowUpRecall, getLastUserMessageFromChatHistory } from './composerArrowUpRecall.js';
-import { highlightToolOutput, _attachDiffApprovalButtons } from './toolOutputHooks.js';
+import { highlightToolOutput, _attachDiffApprovalButtons, buildAgentDiffHtml } from './toolOutputHooks.js';
 
 // Lazy loader for document.js — caches the in-flight promise so concurrent
 // callers share one fetch. Returns the module's default export. Resolves to
@@ -2278,30 +2278,8 @@ function _doc() {
                   if (json.output && json.output.trim()) {
                     outHtml = `<details class="agent-tool-output"><summary>Output</summary><pre>${esc(json.output)}</pre></details>`;
                   }
-                  // File-write diff (write_file): show a before/after unified diff.
-                  let diffHtml = '';
-                  if (json.diff && json.diff.text) {
-                    const d = json.diff;
-                    // Collapsed summary: filename + +adds (green) / −dels (red).
-                    const stat = [
-                      d.new_file ? '<span class="diff-stat-new">new</span>' : '',
-                      d.added ? `<span class="diff-stat-add">+${d.added}</span>` : '',
-                      d.removed ? `<span class="diff-stat-del">−${d.removed}</span>` : '',
-                    ].filter(Boolean).join(' ');
-                    const rows = d.text.split('\n').map(line => {
-                      let cls = 'diff-ctx', text = line;
-                      if (line.startsWith('+++') || line.startsWith('---')) cls = 'diff-meta';
-                      else if (line.startsWith('@@')) cls = 'diff-hunk';
-                      // Drop the leading diff marker (+/-/space) — the row colour
-                      // already encodes add/del, and keeping it doubles up with
-                      // markdown "- " bullets (reads as "+-"/"--").
-                      else if (line.startsWith('+')) { cls = 'diff-add'; text = line.slice(1); }
-                      else if (line.startsWith('-')) { cls = 'diff-del'; text = line.slice(1); }
-                      else if (line.startsWith(' ')) { text = line.slice(1); }
-                      return `<span class="${cls}">${esc(text) || '&nbsp;'}</span>`;
-                    }).join('');  // spans are display:block — a literal \n here would double-space the diff
-                    diffHtml = `<details class="agent-tool-output agent-tool-diff"><summary><span class="diff-file">${esc(d.file || 'diff')}</span> <span class="diff-summary-stats">${stat}</span></summary><pre class="diff-pre">${rows}</pre></details>`;
-                  }
+                  // File-write diff (write_file / edit_file): collapsible unified diff.
+                  const diffHtml = buildAgentDiffHtml(json.diff, esc);
                   // For file edits the "command" is the raw JSON args — redundant
                   // next to the diff, so hide it when we have a diff to show.
                   const cmdHtml2 = (cmd && !(json.diff && json.diff.text)) ? `<pre class="agent-thread-cmd">${esc(cmd)}</pre>` : '';
@@ -3005,12 +2983,10 @@ function _doc() {
         if (_researchingStreamIds.has(streamSessionId)) {
           _appendViewReportLink(footerTarget, streamSessionId);
         }
-        // Add "View session changes" chip if this turn produced any checkpoints
-        // (applied or still-staged edits). Cheap server query — the chip
-        // stays in sync via the existing edit_pending SSE events during the
-        // turn, and we re-fetch on finalize to catch anything that landed
-        // in the last moment.
-        _maybeAddSessionChangesChip(footerTarget, streamSessionId);
+        // Strict-mode only: refresh the input-bar pending indicator. Per-edit
+        // diff cards + the Git panel handle review in auto-apply mode — the
+        // old "N changes this session" chip/drawer was redundant and noisy.
+        if (streamSessionId) _refreshEditPendingFromServer(streamSessionId);
         // Also store raw on the footer target so copy/TTS work
         if (footerTarget !== holder) footerTarget.dataset.raw = accumulated;
         if (addAITTSButton && accumulated && window.aiTTSManager?._provider !== 'disabled' && window.aiTTSManager?.available) {
@@ -3856,7 +3832,7 @@ function _doc() {
         <button type="button" class="scd-close" aria-label="Close">×</button>
       </div>
       <div class="scd-list">${rows}</div>
-      ${pendingCount > 0 ? '<div class="scd-foot">Tip: stage-then-approve is the new default. Open each file in the Code Workspace to review the diff first.</div>' : ''}
+      ${pendingCount > 0 ? '<div class="scd-foot">These edits are staged because <strong>Require approval</strong> is on in Settings → AI Defaults → Code Edits. Switch to <em>Auto-apply</em> to skip this step.</div>' : ''}
     `;
     // Insert after the footer (or append to the bubble if no footer).
     const footer = footerTarget.querySelector('.msg-footer');

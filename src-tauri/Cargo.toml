@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.3"
+version = "1.0.4",
 description = "DevSpace — a single-user desktop AI workspace"
 authors = ["you"]
 license = ""

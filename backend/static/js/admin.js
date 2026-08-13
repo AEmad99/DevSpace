@@ -791,7 +791,9 @@ function initEndpointForm() {
       urlInput.value = '';
       urlInput.placeholder = deviceAuthProvider === 'copilot'
         ? 'GitHub Copilot uses GitHub account sign-in'
-        : 'ChatGPT Subscription uses OpenAI account sign-in';
+        : deviceAuthProvider === 'grok-subscription'
+          ? 'Grok Subscription uses xAI account sign-in'
+          : 'ChatGPT Subscription uses OpenAI account sign-in';
       urlInput.readOnly = true;
       if (apiKey) {
         apiKey.value = '';
@@ -1139,8 +1141,16 @@ function initEndpointForm() {
         onStart: ({ start, authUrl }) => {
           if (triggerEl) triggerEl.textContent = 'Waiting...';
           status.className = '';
-          const authLabel = providerKey === 'copilot' ? 'Authorize on GitHub' : 'Authorize with OpenAI';
-          const waitLabel = providerKey === 'copilot' ? 'Waiting for GitHub authorization...' : 'Waiting for ChatGPT authorization...';
+          const authLabel = providerKey === 'copilot'
+            ? 'Authorize on GitHub'
+            : providerKey === 'grok-subscription'
+              ? 'Authorize with xAI'
+              : 'Authorize with OpenAI';
+          const waitLabel = providerKey === 'copilot'
+            ? 'Waiting for GitHub authorization...'
+            : providerKey === 'grok-subscription'
+              ? 'Waiting for xAI authorization...'
+              : 'Waiting for ChatGPT authorization...';
           status.innerHTML =
             '<div class="adm-copilot-panel">' +
               '<div class="adm-copilot-wait"><span class="admin-spinner"></span>' +

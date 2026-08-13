@@ -20,8 +20,10 @@ def test_setup_guide_lists_account_sign_in_providers():
     assert "provider.key" in _SLASH
     assert "'copilot'" in _SLASH
     assert "'chatgpt-subscription'" in _SLASH
+    assert "'grok-subscription'" in _SLASH
     assert "/setup copilot" in _SLASH
     assert "/setup chatgpt-subscription" in _SLASH
+    assert "/setup grok-subscription" in _SLASH
 
 
 def test_clicking_account_sign_in_provider_prefills_setup_command_not_api_key():

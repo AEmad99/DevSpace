@@ -3,6 +3,49 @@
 // chatRenderer.js (history replay). Extracted to remove a byte-identical
 // duplicate definition of these two functions across both files.
 
+function escAttr(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/** Unified diff card for write_file / edit_file tool results. */
+export function buildAgentDiffHtml(d, esc) {
+  if (!d || !d.text) return '';
+  const staged = !!d.staged;
+  const isAuto = d.review === 'auto' || (!staged && d.review !== 'strict');
+  const stat = [
+    d.new_file ? '<span class="diff-stat-new">new</span>' : '',
+    d.added ? `<span class="diff-stat-add">+${d.added}</span>` : '',
+    d.removed ? `<span class="diff-stat-del">−${d.removed}</span>` : '',
+  ].filter(Boolean).join(' ');
+  const rows = d.text.split('\n').map(line => {
+    let cls = 'diff-ctx';
+    let text = line;
+    if (line.startsWith('+++') || line.startsWith('---')) cls = 'diff-meta';
+    else if (line.startsWith('@@')) cls = 'diff-hunk';
+    else if (line.startsWith('+')) { cls = 'diff-add'; text = line.slice(1); }
+    else if (line.startsWith('-')) { cls = 'diff-del'; text = line.slice(1); }
+    else if (line.startsWith(' ')) { text = line.slice(1); }
+    return `<span class="${cls}">${esc(text) || '&nbsp;'}</span>`;
+  }).join('');
+  const modeClass = staged ? 'diff-mode-staged' : (isAuto ? 'diff-mode-auto' : '');
+  const statusPill = staged
+    ? '<span class="diff-status-pill staged">Awaiting approval</span>'
+    : (isAuto ? '<span class="diff-status-pill applied">Written</span>' : '');
+  const openBtn = d.path
+    ? `<button type="button" class="diff-open-editor diff-summary-link" data-path="${escAttr(d.path)}" title="Open in Code Workspace">Open</button>`
+    : '';
+  const pathTitle = d.path ? ` title="${escAttr(d.path)}"` : '';
+  return `<details class="agent-tool-output agent-tool-diff ${modeClass}">` +
+    `<summary${pathTitle}>` +
+    `<span class="diff-file-icon" aria-hidden="true">⎘</span>` +
+    `<span class="diff-file">${esc(d.file || 'diff')}</span>` +
+    `<span class="diff-summary-stats">${stat}</span>` +
+    `${statusPill}${openBtn}` +
+    `</summary><pre class="diff-pre">${rows}</pre></details>`;
+}
+
 // Highlight tool output / diffs with hljs.
 export function highlightToolOutput(node) {
   if (!node || !window.hljs) return;
@@ -35,26 +78,12 @@ export function _attachDiffApprovalButtons(node, diff) {
       document.dispatchEvent(new CustomEvent('workspace:diff-applied', {
         detail: { file: diff.file, path: diff.path || '' },
       }));
+      import('./gitPanel.js').then(m => m.refreshGitPanel?.()).catch(() => {});
     } catch {}
   }
-  // Auto-mode edits are silent: no Apply/Discard bar, just a small "Applied ✓"
-  // badge so the user has a visual breadcrumb. The actual write already
-  // happened on the backend.
-  if (diff && diff.review === 'auto') {
-    if (!diff.path) return;
-    const det = node.querySelector('.agent-tool-diff');
-    const host = (det && det.parentNode) || node;
-    if (!host || host.querySelector('.diff-applied-badge')) return;
-    const badge = document.createElement('div');
-    badge.className = 'diff-applied-badge';
-    const file = diff.file || diff.path;
-    badge.innerHTML =
-      `<span class="diff-applied-tick" aria-hidden="true">✓</span>` +
-      `<span class="diff-applied-text">Applied — ${escText(file)}</span>` +
-      (diff.path
-        ? `<button type="button" class="diff-open-editor" data-path="${escAttr(diff.path)}" title="Open ${escAttr(file)} in the Code Workspace editor">Open in editor</button>`
-        : '');
-    host.appendChild(badge);
+  // Auto-mode: edits are already on disk. The collapsible diff card carries
+  // a "Written" pill — no extra approval bar (review diffs in Git / Code).
+  if (diff && (diff.review === 'auto' || (!diff.staged && diff.review !== 'strict'))) {
     return;
   }
   // No checkpoint → nothing to accept/reject (capture failed or non-edit diff).
@@ -84,17 +113,4 @@ export function _attachDiffApprovalButtons(node, diff) {
   host.appendChild(bar);
 }
 
-// Tiny attribute escaper for the "Open in editor" data-path. Avoids pulling
-// a full escaper into a shared hooks module.
-function escAttr(s) {
-  return String(s || '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-  }[c]));
-}
 
-// Tiny text escaper for the auto-mode "Applied — <file>" label.
-function escText(s) {
-  return String(s || '').replace(/[&<>]/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;',
-  }[c]));
-}

@@ -71,6 +71,11 @@ class TestBuildChatUrl:
     def test_ollama_v1_preserves_openai_compat(self):
         assert build_chat_url("http://nas:11434/v1") == "http://nas:11434/v1/chat/completions"
 
+    def test_grok_subscription_keeps_virtual_chat_path(self):
+        assert build_chat_url("https://api.x.ai/v1/grok-subscription") == (
+            "https://api.x.ai/v1/grok-subscription/chat/completions"
+        )
+
     @pytest.mark.parametrize("bad_base", [
         "https://api.example.com/v1?token=abc",
         "https://api.example.com/v1#fragment",
@@ -90,6 +95,9 @@ class TestBuildModelsUrl:
 
     def test_ollama_tags(self):
         assert build_models_url("https://ollama.com/api") == "https://ollama.com/api/tags"
+
+    def test_grok_subscription_models_use_real_xai_catalog(self):
+        assert build_models_url("https://api.x.ai/v1/grok-subscription") == "https://api.x.ai/v1/models"
 
     @pytest.mark.parametrize("bad_base", [
         "https://api.example.com/v1?token=abc",

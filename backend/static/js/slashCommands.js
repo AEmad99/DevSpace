@@ -64,6 +64,7 @@ const SETUP_PROVIDER_NAMES = ['deepseek', 'openai', 'openrouter', 'ollama', 'xai
 const SETUP_DEVICE_AUTH_PROVIDERS = [
   { key: 'copilot', name: 'GitHub Copilot', aliases: ['github'], command: '/setup copilot' },
   { key: 'chatgpt-subscription', name: 'ChatGPT Subscription', aliases: ['chatgptsubscription', 'chatgpt-sub', 'codex'], command: '/setup chatgpt-subscription' },
+  { key: 'grok-subscription', name: 'Grok Subscription', aliases: ['groksubscription', 'supergrok', 'xai-oauth', 'xai-subscription'], command: '/setup grok-subscription' },
 ];
 const SETUP_PROVIDER_HINT_NAMES = SETUP_PROVIDER_NAMES.concat(SETUP_DEVICE_AUTH_PROVIDERS.map(provider => provider.key));
 const SETUP_PROVIDER_HINT = SETUP_PROVIDER_HINT_NAMES.slice(0, -1).join(', ') + ', or ' + SETUP_PROVIDER_HINT_NAMES[SETUP_PROVIDER_HINT_NAMES.length - 1];
@@ -5091,7 +5092,7 @@ async function _setupProviderDeviceFlow(providerKey) {
   try {
     const result = await runProviderDeviceFlow(providerKey, {
       onStart: async ({ start, authUrl }) => {
-        const place = providerKey === 'copilot' ? 'GitHub' : 'OpenAI';
+        const place = providerKey === 'copilot' ? 'GitHub' : providerKey === 'grok-subscription' ? 'xAI' : 'OpenAI';
         const action = providerKey === 'copilot' ? 'approve the request' : 'enter the code';
         if (providerKey === 'chatgpt-subscription') {
           slashReply(
@@ -5912,7 +5913,7 @@ const COMMANDS = {
     category: 'Getting started',
     help: 'Add local or API model endpoints',
     handler: _cmdSetup,
-    usage: '/setup local URL  ·  /setup groq KEY  ·  /setup copilot  ·  /setup chatgpt-subscription',
+    usage: '/setup local URL  ·  /setup groq KEY  ·  /setup copilot  ·  /setup chatgpt-subscription  ·  /setup grok-subscription',
     // Provider subs so the autocomplete popup surfaces "/setup deepseek",
     // "/setup openai", etc. when the user types "/setup de". Each sub's
     // handler is a thin wrapper that re-prepends the sub name and
@@ -5931,6 +5932,7 @@ const COMMANDS = {
       ollama:     { help: 'Ollama Cloud',  usage: '/setup ollama KEY',          handler: (a, c) => _cmdSetup(['ollama',     ...a], c) },
       copilot:    { help: 'GitHub Copilot', usage: '/setup copilot',            handler: (a, c) => _cmdSetup(['copilot',    ...a], c) },
       'chatgpt-subscription': { help: 'ChatGPT Subscription', alias: ['codex'], usage: '/setup chatgpt-subscription', handler: (a, c) => _cmdSetup(['chatgpt-subscription', ...a], c) },
+      'grok-subscription': { help: 'Grok Subscription', alias: ['supergrok'], usage: '/setup grok-subscription', handler: (a, c) => _cmdSetup(['grok-subscription', ...a], c) },
       local:      { help: 'Local model server (vLLM / LM Studio / llama.cpp / Ollama)',
                     usage: '/setup local http://localhost:8000/v1',
                     handler: (a, c) => _cmdSetup(['local', ...a], c) },

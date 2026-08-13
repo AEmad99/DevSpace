@@ -63,6 +63,19 @@ def test_coding_verb_only_requests_seed_files_domain():
         )
 
 
+def test_on_disk_documentation_requests_seed_files_domain():
+    for q in (
+        "document the application features",
+        "write an overview.md for this project",
+        "create a README describing the architecture",
+        "describe the codebase features in a markdown file",
+    ):
+        domains = _domains_for(q)
+        assert "files" in domains, (
+            f"on-disk doc request {q!r} must seed files; got {sorted(domains)}"
+        )
+
+
 def test_non_coding_smalltalk_does_not_seed_files_domain():
     # Negative: casual smalltalk must NOT pull file tools into context.
     for q in ("hi there", "thanks!", "what can you do?"):

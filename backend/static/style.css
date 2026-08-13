@@ -9621,57 +9621,130 @@ body.hide-thinking .thinking-section { display: none !important; }
   list-style: none;
 }
 .agent-tool-output summary::-webkit-details-marker { display: none; }
-/* File-write diff — neutral chrome (not the red error tint) + colored lines */
+/* File-write diff — compact coding-agent card (GitHub/VS Code style). */
 .agent-tool-diff {
-  background: color-mix(in srgb, var(--fg) 4%, transparent);
-  border-color: color-mix(in srgb, var(--fg) 18%, transparent);
+  margin-top: 6px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--fg) 14%, transparent);
+  background: color-mix(in srgb, var(--fg) 3%, var(--bg));
+  overflow: hidden;
 }
-.agent-tool-diff summary {
-  color: var(--fg);
-  background: color-mix(in srgb, var(--fg) 7%, transparent);
-  border-bottom-color: color-mix(in srgb, var(--fg) 12%, transparent);
+.agent-tool-diff.diff-mode-auto {
+  border-left: 3px solid var(--green, #2ecc71);
 }
-.agent-tool-diff .diff-stat {
-  font-weight: 600;
-  opacity: 0.7;
-  font-family: var(--mono, monospace);
+.agent-tool-diff.diff-mode-staged {
+  border-left: 3px solid var(--warn, #f0ad4e);
 }
-/* Collapsed diff summary: filename + +adds/−dels (theme green/red). */
 .agent-tool-diff summary {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 8px 10px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+.agent-tool-diff[open] summary {
+  border-bottom-color: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+.agent-tool-diff .diff-file-icon {
+  flex-shrink: 0;
+  opacity: 0.45;
+  font-size: 12px;
+  line-height: 1;
 }
 .agent-tool-diff .diff-file {
+  flex: 1;
   font-family: var(--mono, monospace);
   font-weight: 600;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 .agent-tool-diff .diff-summary-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin-left: auto;
   font-family: var(--mono, monospace);
   font-weight: 600;
+  font-size: 11px;
   flex-shrink: 0;
 }
 .agent-tool-diff .diff-summary-stats .diff-stat-add { color: var(--green, #2ecc71); }
-.agent-tool-diff .diff-summary-stats .diff-stat-del { color: var(--red, #e74c3c); }
-.agent-tool-diff .diff-summary-stats .diff-stat-new { color: var(--accent, var(--red)); opacity: 0.85; }
+.agent-tool-diff .diff-summary-stats .diff-stat-del { color: #e74c3c; }
+.agent-tool-diff .diff-summary-stats .diff-stat-new {
+  color: var(--accent, var(--red));
+  opacity: 0.9;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.agent-tool-diff .diff-status-pill {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.agent-tool-diff .diff-status-pill.applied {
+  color: var(--green, #2ecc71);
+  background: color-mix(in srgb, var(--green, #2ecc71) 14%, transparent);
+}
+.agent-tool-diff .diff-status-pill.staged {
+  color: var(--warn, #f0ad4e);
+  background: color-mix(in srgb, var(--warn, #f0ad4e) 16%, transparent);
+}
+.agent-tool-diff .diff-summary-link {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--fg) 20%, transparent);
+  background: transparent;
+  color: var(--fg);
+  opacity: 0.75;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s;
+}
+.agent-tool-diff .diff-summary-link:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--accent, var(--red)) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent, var(--red)) 40%, transparent);
+}
 .diff-pre {
   margin: 0;
-  padding: 8px 10px;
+  padding: 10px 12px;
   overflow-x: auto;
   font-family: var(--mono, monospace);
-  font-size: 0.82em;
-  line-height: 1.45;
+  font-size: 11.5px;
+  line-height: 1.5;
+  background: color-mix(in srgb, var(--bg) 96%, #000);
 }
-.diff-pre span { display: block; white-space: pre; }
-.diff-pre .diff-add { background: color-mix(in srgb, #2ecc71 22%, transparent); }
-.diff-pre .diff-del { background: color-mix(in srgb, #e74c3c 22%, transparent); }
-.diff-pre .diff-hunk { color: var(--accent); opacity: 0.85; }
-.diff-pre .diff-meta { opacity: 0.55; }
-.diff-pre .diff-ctx { opacity: 0.8; }
+.diff-pre span { display: block; white-space: pre; padding: 0 4px; }
+.diff-pre .diff-add {
+  background: color-mix(in srgb, var(--green, #2ecc71) 18%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--green, #2ecc71) 55%, transparent);
+}
+.diff-pre .diff-del {
+  background: color-mix(in srgb, #e74c3c 16%, transparent);
+  border-left: 2px solid color-mix(in srgb, #e74c3c 50%, transparent);
+}
+.diff-pre .diff-hunk {
+  color: var(--accent, var(--red));
+  opacity: 0.9;
+  font-weight: 600;
+  padding-top: 4px;
+}
+.diff-pre .diff-meta { opacity: 0.5; font-size: 10.5px; }
+.diff-pre .diff-ctx { opacity: 0.72; }
 /* Suppress the global `summary::before { content: '▶' }` left arrow — this
    section uses a right-side chevron instead. */
 .agent-tool-output summary::before { content: none; }

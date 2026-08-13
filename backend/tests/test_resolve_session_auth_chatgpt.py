@@ -165,6 +165,48 @@ def test_chatgpt_subscription_clears_previously_persisted_bearer(monkeypatch):
         db.close()
 
 
+_GROK_BASE = "https://api.x.ai/v1/grok-subscription"
+
+
+def test_grok_subscription_auth_is_not_written_to_sessions_table(monkeypatch):
+    TestSessionLocal = _mem_db(monkeypatch)
+    db = TestSessionLocal()
+    try:
+        db.add(ModelEndpoint(
+            id="ep1", name="Grok Subscription", base_url=_GROK_BASE,
+            provider_auth_id="auth1", owner="alice", is_enabled=True, api_key=None,
+        ))
+        db.add(DbSession(
+            id="sess1", name="chat", endpoint_url=_GROK_BASE,
+            model="grok-4.6", owner="alice", headers={},
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr(
+        endpoint_resolver, "resolve_endpoint_runtime",
+        lambda ep, owner=None: (_GROK_BASE, "live-access-token"),
+    )
+
+    sess = types.SimpleNamespace(
+        id="sess1", endpoint_url=_GROK_BASE, model="grok-4.6",
+        owner="alice", headers={},
+    )
+    chat_helpers.resolve_session_auth(sess, "sess1", owner="alice")
+
+    assert sess.headers["Authorization"] == "Bearer live-access-token"
+    db = TestSessionLocal()
+    try:
+        row = db.query(DbSession).filter(DbSession.id == "sess1").first()
+        stored = row.headers or {}
+        assert not any(k.lower() == "authorization" for k in stored), (
+            f"Grok bearer leaked into sessions table: {stored}"
+        )
+    finally:
+        db.close()
+
+
 def test_chatgpt_subscription_fallback_auth_is_not_written_to_sessions_table(monkeypatch):
     """Fallback endpoint selection must keep the resolved bearer request-local."""
     TestSessionLocal = _mem_db(monkeypatch)

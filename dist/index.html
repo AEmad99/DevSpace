@@ -59,9 +59,13 @@
     const msgs = ['Starting local engine…', 'Loading models & tools…', 'Warming up workspace…'];
     let i = 0;
     setInterval(() => { i = (i + 1) % msgs.length; if (el) el.textContent = msgs[i]; }, 2200);
-    if (window.__TAURI__?.event) {
-      window.__TAURI__.event.listen('backend-status', (e) => { if (el && e.payload) el.textContent = e.payload; });
-    }
+    (async function listenBackendStatus() {
+      const handler = (e) => { if (el && e?.payload) el.textContent = e.payload; };
+      const listen = window.__TAURI__?.event?.listen;
+      if (typeof listen === 'function') {
+        try { await listen('backend-status', handler); } catch (_) {}
+      }
+    })();
   </script>
 </body>
 </html>

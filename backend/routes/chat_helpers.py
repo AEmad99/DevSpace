@@ -212,6 +212,7 @@ def try_fallback_endpoint(sess, session_id: str) -> dict | None:
         resolve_endpoint_runtime,
     )
     from src.chatgpt_subscription import is_chatgpt_subscription_base
+    from src.grok_subscription import is_grok_subscription_base
 
     current_url = sess.endpoint_url or ""
     owner = getattr(sess, "owner", None)
@@ -258,7 +259,9 @@ def try_fallback_endpoint(sess, session_id: str) -> dict | None:
             new_model = models[0]
             chat_url = build_chat_url(base)
             new_headers = build_headers(api_key, base)
-            persisted_headers = {} if is_chatgpt_subscription_base(base) else new_headers
+            persisted_headers = {} if (
+                is_chatgpt_subscription_base(base) or is_grok_subscription_base(base)
+            ) else new_headers
 
             sess.model = new_model
             sess.endpoint_url = chat_url
@@ -415,15 +418,16 @@ def refresh_session_endpoint_url(sess, session_id: str, owner: Optional[str] = N
                 # ChatGPT Subscription stores no persisted headers (refreshable
                 # bearer, resolved request-local). Don't clobber an empty dict.
                 from src.chatgpt_subscription import is_chatgpt_subscription_base
-                is_chatgpt = is_chatgpt_subscription_base(base)
+                from src.grok_subscription import is_grok_subscription_base
+                is_refreshable = is_chatgpt_subscription_base(base) or is_grok_subscription_base(base)
                 sess.endpoint_url = new_url
-                if not is_chatgpt:
+                if not is_refreshable:
                     sess.headers = new_headers
                 update_q = db.query(DBSession).filter(DBSession.id == session_id)
                 if owner:
                     update_q = update_q.filter(DBSession.owner == owner)
                 update_fields = {"endpoint_url": new_url}
-                if not is_chatgpt:
+                if not is_refreshable:
                     update_fields["headers"] = new_headers
                 update_q.update(update_fields)
                 db.commit()
@@ -444,11 +448,13 @@ def resolve_session_auth(sess, session_id: str, owner: Optional[str] = None):
     """Ensure session has auth headers — resolve from endpoint DB if missing."""
     try:
         from src.chatgpt_subscription import is_chatgpt_subscription_base
-        is_chatgpt_subscription = is_chatgpt_subscription_base(getattr(sess, "endpoint_url", "") or "")
+        from src.grok_subscription import is_grok_subscription_base
+        session_url = getattr(sess, "endpoint_url", "") or ""
+        is_refreshable_auth = is_chatgpt_subscription_base(session_url) or is_grok_subscription_base(session_url)
     except Exception:
-        is_chatgpt_subscription = False
+        is_refreshable_auth = False
     has_auth = _has_auth_keys(sess.headers)
-    if has_auth and not is_chatgpt_subscription:
+    if has_auth and not is_refreshable_auth:
         return
 
     try:
@@ -477,7 +483,7 @@ def resolve_session_auth(sess, session_id: str, owner: Optional[str] = None):
                     # No usable key (e.g. ChatGPT Subscription needs re-auth).
                     return
                 sess.headers = build_headers(api_key, base)
-                if is_chatgpt_subscription:
+                if is_refreshable_auth:
                     # The bearer is short-lived and re-resolved per request, so it
                     # stays request-local and is never written to the plaintext
                     # sessions.headers column. Proactively strip any bearer an
@@ -489,8 +495,8 @@ def resolve_session_auth(sess, session_id: str, owner: Optional[str] = None):
                     if stored is not None and _has_auth_keys(stored.headers):
                         stale_q.update({"headers": {}})
                         db.commit()
-                        logger.info(f"Cleared persisted ChatGPT Subscription bearer from session {session_id}")
-                    logger.debug(f"Resolved request-local ChatGPT Subscription auth for session {session_id}")
+                        logger.info(f"Cleared persisted subscription bearer from session {session_id}")
+                    logger.debug(f"Resolved request-local subscription auth for session {session_id}")
                     return
                 update_q = db.query(DBSession).filter(DBSession.id == session_id)
                 if owner:

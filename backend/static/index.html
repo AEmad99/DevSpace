@@ -1679,8 +1679,15 @@
             <div class="admin-toggle-sub" style="margin-bottom:8px">When on, agent <code>send_email</code> / <code>reply_to_email</code> tools stage a draft for your approval (in the chat) instead of SMTPing immediately. Stops models from inventing a signature and sending it to a real recipient before you can review.</div>
           </div>
           <div class="admin-card">
-            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>Code Edits<span style="flex:1"></span><label class="admin-switch" title="When on, every write_file / edit_file is staged and shown as a diff you must Accept or Discard before it lands on disk."><input type="checkbox" id="set-agentEditReview"><span class="admin-slider"></span></label></h2>
-            <div class="admin-toggle-sub" style="margin-bottom:8px"><strong>Off (default):</strong> the agent's <code>write_file</code> / <code>edit_file</code> calls land on disk immediately. Each edit appears as a small <em>Applied ✓</em> badge in the chat (with a jump-to-editor link).<br><strong>On (strict):</strong> every edit is staged and you see a before/after diff card with <em>Apply</em> / <em>Discard</em> buttons. Nothing reaches disk until you click Apply. Use this for real code work on a project you don't want silently mutated.</div>
+            <h2 style="display:flex;align-items:center;gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:1px;opacity:0.6;flex-shrink:0"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>Code Edits</h2>
+            <div class="admin-toggle-sub" style="margin-bottom:10px">How the agent applies <code>write_file</code> / <code>edit_file</code> changes. Auto-apply is the default — edits land on disk immediately and show a small <em>Applied ✓</em> badge you can revert later. Choose <em>Require approval</em> only if you want every edit staged for manual review first.</div>
+            <div class="settings-row" style="align-items:center;gap:10px;">
+              <label class="settings-label" for="set-agentEditReview" style="flex:0 0 auto;min-width:0;">Permission</label>
+              <select id="set-agentEditReview" class="settings-select" style="flex:1;max-width:280px;" aria-label="Code edit permission level">
+                <option value="auto">Auto-apply (default)</option>
+                <option value="strict">Require approval before applying</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -2265,6 +2272,7 @@
                   <option value="https://api.openai.com/v1" data-logo="openai">OpenAI</option>
                   <option value="copilot" data-logo="github" data-auth-flow="copilot">GitHub Copilot</option>
                   <option value="chatgpt-subscription" data-logo="openai" data-auth-flow="chatgpt-subscription">ChatGPT Subscription</option>
+                  <option value="grok-subscription" data-logo="grok" data-auth-flow="grok-subscription">Grok Subscription</option>
                   <option value="https://openrouter.ai/api/v1" data-logo="openrouter">OpenRouter</option>
                   <option value="https://ollama.com/api" data-logo="ollama">Ollama Cloud</option>
                   <option value="https://api.groq.com/openai/v1" data-logo="groq">Groq</option>

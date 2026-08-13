@@ -676,6 +676,10 @@ app.include_router(setup_copilot_routes())
 from routes.chatgpt_subscription_routes import setup_chatgpt_subscription_routes
 app.include_router(setup_chatgpt_subscription_routes())
 
+# Grok Subscription device-flow login
+from routes.grok_subscription_routes import setup_grok_subscription_routes
+app.include_router(setup_grok_subscription_routes())
+
 # TTS
 from routes.tts_routes import setup_tts_routes
 app.include_router(setup_tts_routes(tts_service))

@@ -1773,23 +1773,25 @@ async function initAgentSettings() {
     });
   }
 
-  // Code Edits review toggle (separate card on the AI Defaults tab).
-  // Mirrors the `agent_edit_review` setting: off = auto (writes land on disk
-  // immediately, no Apply prompts), on = strict (every edit is staged as a
-  // diff you must Accept or Discard). Default OFF so the agent flies through
-  // edits; flip ON for real code work where silent writes are dangerous.
+  // Code Edits permission (AI Defaults tab). Mirrors `agent_edit_review`:
+  // auto = writes land on disk immediately (default), strict = stage every
+  // edit for manual Apply/Discard. Persist _edit_review_user_choice so a
+  // one-time migration does not override an explicit strict choice.
   var editReview = el('set-agentEditReview');
   if (editReview) {
     try {
       var s = await fetch('/api/auth/settings', { credentials: 'same-origin' }).then(r => r.json());
-      editReview.checked = (s.agent_edit_review || 'auto').toLowerCase() === 'strict';
+      editReview.value = (s.agent_edit_review || 'auto').toLowerCase() === 'strict' ? 'strict' : 'auto';
     } catch (_) {}
     editReview.addEventListener('change', async () => {
       try {
         await fetch('/api/auth/settings', {
           method: 'POST', credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ agent_edit_review: editReview.checked ? 'strict' : 'auto' }),
+          body: JSON.stringify({
+            agent_edit_review: editReview.value === 'strict' ? 'strict' : 'auto',
+            _edit_review_user_choice: true,
+          }),
         });
       } catch (_) {}
     });

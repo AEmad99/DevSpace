@@ -673,6 +673,9 @@ def _detect_provider(url: str) -> str:
     from src.chatgpt_subscription import is_chatgpt_subscription_base
     if is_chatgpt_subscription_base(url):
         return "chatgpt-subscription"
+    from src.grok_subscription import is_grok_subscription_base
+    if is_grok_subscription_base(url):
+        return "grok-subscription"
     from src.copilot import is_copilot_base
     if is_copilot_base(url):
         return "copilot"
@@ -867,6 +870,8 @@ def _provider_label(url: str) -> str:
         return "provider"
     if _host_match(url, "anthropic.com"): return "Anthropic"
     if _host_match(url, "ollama.com"): return "Ollama Cloud"
+    from src.grok_subscription import is_grok_subscription_base
+    if is_grok_subscription_base(url): return "Grok Subscription"
     if _host_match(url, "x.ai"): return "xAI"
     if _host_match(url, "openai.com"): return "OpenAI"
     if _host_match(url, "openrouter.ai"): return "OpenRouter"
@@ -1633,6 +1638,9 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
                 payload[tok_key] = max_tokens
     else:
         target_url = url
+        if provider == "grok-subscription":
+            from src.grok_subscription import grok_subscription_request_url
+            target_url = grok_subscription_request_url(url)
         if provider == "copilot":
             from src.copilot import apply_request_headers
             apply_request_headers(h, messages_copy)
@@ -1853,6 +1861,9 @@ async def llm_call_async(
             _apply_minimax_openai_cache(payload, url, session_id)
     else:
         target_url = url
+        if provider == "grok-subscription":
+            from src.grok_subscription import grok_subscription_request_url
+            target_url = grok_subscription_request_url(url)
         h = _provider_headers(provider, headers)
         if provider == "copilot":
             from src.copilot import apply_request_headers
@@ -1984,6 +1995,9 @@ async def stream_llm(url: str, model: str, messages: List[Dict], temperature: fl
         payload = _build_anthropic_payload(model, messages_copy, temperature, max_tokens, stream=True, tools=tools)
     else:
         target_url = url
+        if provider == "grok-subscription":
+            from src.grok_subscription import grok_subscription_request_url
+            target_url = grok_subscription_request_url(url)
         payload = {
             "model": model,
             "messages": messages_copy,

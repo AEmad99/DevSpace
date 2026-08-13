@@ -119,105 +119,165 @@ fn pick_free_port() -> u16 {
         .expect("could not allocate a local port for the backend")
 }
 
+/// Repo root (`DevSpace/`), anchored to this crate's compile-time location.
+fn repo_root() -> std::path::PathBuf {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or(manifest_dir)
+}
+
+/// Best-effort Python interpreter for local development.
+///
+/// Tries, in order: odysseus-ref venv, backend-local venvs, then the newest
+/// `%LOCALAPPDATA%\Programs\Python\Python3*\python.exe` on Windows.
+fn resolve_dev_python(repo_root: &std::path::Path) -> std::path::PathBuf {
+    let candidates = [
+        repo_root
+            .join("odysseus-ref")
+            .join("venv")
+            .join("Scripts")
+            .join("python.exe"),
+        repo_root
+            .join("backend")
+            .join(".venv")
+            .join("Scripts")
+            .join("python.exe"),
+        repo_root
+            .join("backend")
+            .join("venv")
+            .join("Scripts")
+            .join("python.exe"),
+    ];
+    for path in &candidates {
+        if path.exists() {
+            return path.clone();
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let base = std::path::PathBuf::from(local)
+                .join("Programs")
+                .join("Python");
+            if base.is_dir() {
+                let mut installs: Vec<std::path::PathBuf> =
+                    std::fs::read_dir(&base)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.path())
+                        .filter(|p| {
+                            p.file_name()
+                                .and_then(|n| n.to_str())
+                                .map(|n| n.starts_with("Python3"))
+                                .unwrap_or(false)
+                        })
+                        .collect();
+                installs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                for install in installs {
+                    let exe = install.join("python.exe");
+                    if exe.exists() {
+                        return exe;
+                    }
+                }
+            }
+        }
+    }
+
+    // Last resort — rely on PATH (may fail on machines with no python on PATH).
+    std::path::PathBuf::from("python")
+}
+
+/// Probe bundled install resources for (python_exe, backend_dir).
+fn bundled_paths(app: &tauri::AppHandle) -> (Option<std::path::PathBuf>, Option<std::path::PathBuf>) {
+    let Ok(res) = app.path().resource_dir() else {
+        return (None, None);
+    };
+
+    let exe_parent = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+    let mut bases: Vec<std::path::PathBuf> =
+        std::iter::once(res.clone()).chain(exe_parent.clone()).collect();
+    if let Some(p) = exe_parent
+        .as_ref()
+        .and_then(|p| p.parent().map(|p| p.join("resources")))
+    {
+        bases.push(p);
+    }
+
+    let py = bases
+        .iter()
+        .map(|b| b.join("python").join("python.exe"))
+        .find(|p| p.exists());
+    let be = bases
+        .iter()
+        .flat_map(|b| [b.join("backend"), b.join("resources").join("backend")])
+        .find(|p| p.join("app.py").exists());
+
+    if py.is_none() {
+        log::error!(
+            "Bundled Python not found. Probed: {}",
+            bases
+                .iter()
+                .map(|b| format!("{}/python/python.exe", b.display()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if be.is_none() {
+        log::error!(
+            "Bundled backend not found. Probed: {}",
+            bases
+                .iter()
+                .flat_map(|b| {
+                    [
+                        format!("{}/backend/app.py", b.display()),
+                        format!("{}/resources/backend/app.py", b.display()),
+                    ]
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    (py, be)
+}
+
 /// Resolve (python_exe, backend_dir).
 ///
-/// Priority:
-///   1. Env overrides (DEVSPACE_PYTHON / DEVSPACE_BACKEND_DIR) — for testing.
-///   2. Bundled resources — a self-contained install ships its own relocatable
-///      CPython under `<resources>/python/python.exe` and the backend source
-///      under `<resources>/backend`. This is what makes the installed app run
-///      on any machine with no dev-machine dependency.
-///   3. Dev fallback — the repo's `../backend` + the odysseus-ref venv, anchored
-///      to this crate's compile-time location, for `cargo tauri dev`.
+/// Dev (`cargo tauri dev` / debug builds):
+///   1. Env overrides (DEVSPACE_PYTHON / DEVSPACE_BACKEND_DIR)
+///   2. Live repo `backend/` + resolve_dev_python()
+///
+/// Release (installed app):
+///   1. Env overrides
+///   2. Bundled resources (`<resources>/python`, `<resources>/backend`)
+///   3. Dev fallback (last resort)
 fn backend_paths(app: &tauri::AppHandle) -> (std::path::PathBuf, std::path::PathBuf) {
-    // 1. Explicit env overrides win.
     let env_python = std::env::var_os("DEVSPACE_PYTHON").map(std::path::PathBuf::from);
     let env_backend = std::env::var_os("DEVSPACE_BACKEND_DIR").map(std::path::PathBuf::from);
 
-    // 2. Bundled resources (installed app). resource_dir() points at the
-    //    install's resources root; the python runtime + backend are copied
-    //    there by tauri.conf.json `bundle.resources`. Tauri's exact on-disk
-    //    layout depends on whether resources were declared as a map (clean
-    //    `python/`, `backend/` targets) or a glob (path preserved under
-    //    `resources/...`), so probe both rather than hard-coding one.
-    //    Also probe the install root and the exe's parent dir, since some
-    //    installer builds or corrupted installs leave the bundled files there.
-    let (res_python, res_backend) = match app.path().resource_dir() {
-        Ok(res) => {
-            let exe_parent = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.to_path_buf()));
-            // Collect every plausible base dir the bundler might have used.
-            let mut bases: Vec<std::path::PathBuf> =
-                std::iter::once(res.clone()).chain(exe_parent.clone()).collect();
-            // Also try a "resources/" sibling of the exe parent in case the
-            // NSIS template put the assets there instead of under the
-            // standard `resources/` returned by `resource_dir()`.
-            if let Some(p) = exe_parent
-                .as_ref()
-                .and_then(|p| p.parent().map(|p| p.join("resources")))
-            {
-                bases.push(p);
-            }
+    let root = repo_root();
+    let dev_backend = root.join("backend");
+    let dev_python = resolve_dev_python(&root);
 
-            let py = bases
-                .iter()
-                .map(|b| b.join("python").join("python.exe"))
-                .find(|p| p.exists());
-            let be = bases
-                .iter()
-                .flat_map(|b| [b.join("backend"), b.join("resources").join("backend")])
-                .find(|p| p.join("app.py").exists());
+    if cfg!(debug_assertions) {
+        let python = env_python.unwrap_or(dev_python);
+        let backend_dir = env_backend.unwrap_or(dev_backend);
+        log::info!(
+            "Dev paths: python={}, backend={}",
+            python.display(),
+            backend_dir.display()
+        );
+        return (python, backend_dir);
+    }
 
-            if py.is_none() {
-                log::error!(
-                    "Bundled Python not found. Probed: {}",
-                    bases
-                        .iter()
-                        .map(|b| format!("{}/python/python.exe", b.display()))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            if be.is_none() {
-                log::error!(
-                    "Bundled backend not found. Probed: {}",
-                    bases
-                        .iter()
-                        .flat_map(|b| {
-                            [
-                                format!("{}/backend/app.py", b.display()),
-                                format!("{}/resources/backend/app.py", b.display()),
-                            ]
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-            (py, be)
-        }
-        Err(_) => (None, None),
-    };
-
-    // 3. Dev fallback anchored to the crate location.
-    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest_dir
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| manifest_dir.clone());
-    let dev_backend = repo_root.join("backend");
-    let dev_python = repo_root
-        .join("odysseus-ref")
-        .join("venv")
-        .join("Scripts")
-        .join("python.exe");
-
-    let python = env_python
-        .or(res_python)
-        .unwrap_or(dev_python);
-    let backend_dir = env_backend
-        .or(res_backend)
-        .unwrap_or(dev_backend);
+    let (res_python, res_backend) = bundled_paths(app);
+    let python = env_python.or(res_python).unwrap_or(dev_python);
+    let backend_dir = env_backend.or(res_backend).unwrap_or(dev_backend);
     (python, backend_dir)
 }
 
@@ -396,19 +456,40 @@ fn spawn_backend(app: &tauri::AppHandle, port: u16) -> std::io::Result<Child> {
         cmd.creation_flags(0x0800_0000);
     }
 
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    cmd.stdin(Stdio::null()).stdout(Stdio::null());
+
+    // In dev, capture stderr so import/startup crashes are diagnosable instead
+    // of leaving the splash spinning until the port-poll times out.
+    if cfg!(debug_assertions) {
+        let log_path = std::env::temp_dir().join("devspace_backend.log");
+        match std::fs::File::create(&log_path) {
+            Ok(file) => {
+                log::info!("Backend stderr -> {}", log_path.display());
+                cmd.stderr(Stdio::from(file));
+            }
+            Err(e) => {
+                log::warn!("could not open backend log {}: {e}", log_path.display());
+                cmd.stderr(Stdio::null());
+            }
+        }
+    } else {
+        cmd.stderr(Stdio::null());
+    }
 
     cmd.spawn()
 }
 
-/// Poll the port until the backend accepts a TCP connection (or we give up).
-fn wait_for_backend(port: u16, attempts: u32, delay: Duration) -> bool {
+/// Poll the port until the backend accepts a TCP connection, the child exits
+/// early, or we give up. Returns `true` when the port is reachable.
+fn wait_for_backend(port: u16, child: &mut Child, attempts: u32, delay: Duration) -> bool {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     for _ in 0..attempts {
         if TcpStream::connect_timeout(&addr, Duration::from_millis(800)).is_ok() {
             return true;
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            log::error!("Backend process exited before port {port} was reachable: {status}");
+            return false;
         }
         std::thread::sleep(delay);
     }
@@ -469,7 +550,13 @@ pub fn run() {
             let (python, backend_dir) = backend_paths(&app.handle().clone());
             if !python.exists() || !backend_dir.join("app.py").exists() {
                 let msg = if !python.exists() {
-                    "Bundled Python runtime is missing — please reinstall DevSpace."
+                    if cfg!(debug_assertions) {
+                        "Python not found — install Python 3.12+ or set DEVSPACE_PYTHON."
+                    } else {
+                        "Bundled Python runtime is missing — please reinstall DevSpace."
+                    }
+                } else if cfg!(debug_assertions) {
+                    "Backend source not found — expected backend/app.py in the repo."
                 } else {
                     "Bundled backend is missing — please reinstall DevSpace."
                 };
@@ -505,7 +592,17 @@ pub fn run() {
             // Wait for readiness off the UI thread, then navigate the webview.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                if wait_for_backend(port, 240, Duration::from_millis(500)) {
+                let backend_state = handle.state::<BackendProcess>();
+                let ready = {
+                    let mut guard = backend_state.child.lock().unwrap();
+                    match guard.as_mut() {
+                        Some(child) => {
+                            wait_for_backend(port, child, 240, Duration::from_millis(500))
+                        }
+                        None => false,
+                    }
+                };
+                if ready {
                     let url = format!("http://127.0.0.1:{port}/");
                     log::info!("Backend ready, loading {url}");
                     if let Some(window) = handle.get_webview_window("main") {
@@ -520,9 +617,17 @@ pub fn run() {
                     }
                 } else {
                     log::error!("Backend never became reachable on port {port}");
+                    let log_hint = if cfg!(debug_assertions) {
+                        let p = std::env::temp_dir().join("devspace_backend.log");
+                        format!(" See {} for details.", p.display())
+                    } else {
+                        String::new()
+                    };
                     let _ = handle.emit(
                         "backend-status",
-                        "Local engine failed to start \u{2014} check logs.",
+                        format!(
+                            "Local engine failed to start \u{2014} check logs.{log_hint}"
+                        ),
                     );
                 }
             });

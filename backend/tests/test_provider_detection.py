@@ -46,6 +46,11 @@ class TestDetectProviderRealHosts:
         assert llm_core._detect_provider("https://chatgpt.com/backend-api/codex") == "chatgpt-subscription"
         assert llm_core._detect_provider("https://chatgpt.com/backend-api/codex/responses") == "chatgpt-subscription"
 
+    def test_grok_subscription_virtual_base(self):
+        assert llm_core._detect_provider("https://api.x.ai/v1/grok-subscription") == "grok-subscription"
+        assert llm_core._detect_provider("https://api.x.ai/v1/grok-subscription/chat/completions") == "grok-subscription"
+        assert llm_core._detect_provider("https://api.x.ai/v1") == "openai"
+
     def test_anthropic(self):
         assert llm_core._detect_provider("https://api.anthropic.com") == "anthropic"
 

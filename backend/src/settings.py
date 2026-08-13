@@ -257,6 +257,36 @@ DEFAULT_FEATURES = {
 
 # ── Settings (data/settings.json) ──
 
+def _apply_settings_migrations(saved: dict) -> dict:
+    """One-shot migrations for on-disk settings.json. Persists when changed."""
+    migrations = dict(saved.get("_settings_migrations") or {})
+    changed = False
+
+    # v1.1.1 flipped agent_edit_review default from "strict" to "auto".
+    # Installs that still have the old default persisted never opted in to
+    # strict via Settings — migrate them so the agent auto-applies edits again.
+    if not migrations.get("edit_review_auto_v2"):
+        if (
+            saved.get("agent_edit_review") == "strict"
+            and not saved.get("_edit_review_user_choice")
+        ):
+            saved["agent_edit_review"] = "auto"
+            changed = True
+            logger.info(
+                "Migrated agent_edit_review strict→auto (v1.1.1 default flip)"
+            )
+        migrations["edit_review_auto_v2"] = True
+        saved["_settings_migrations"] = migrations
+        changed = True
+
+    if changed:
+        try:
+            save_settings(saved)
+        except Exception as e:
+            logger.warning("Could not persist settings migration: %s", e)
+    return saved
+
+
 def load_settings() -> dict:
     """Load settings merged with defaults. Always returns a complete dict."""
     global _settings_cache
@@ -268,6 +298,7 @@ def load_settings() -> dict:
             saved = json.load(f)
         if not isinstance(saved, dict):
             raise ValueError("settings must be an object")
+        saved = _apply_settings_migrations(saved)
         merged = {**DEFAULT_SETTINGS, **saved}
     except (FileNotFoundError, PermissionError, json.JSONDecodeError, ValueError):
         merged = dict(DEFAULT_SETTINGS)
